@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.5] - 2026-05-18
+
+### Fixed in 2.2.5
+
+- **Broken HandBrake documentation links**: the "Encoder speed" and "Audio settings" links in the preset editor now point to valid pages on the HandBrake docs site.
+
 ## [2.2.4] - 2026-05-18
 
 ### Added in 2.2.4
