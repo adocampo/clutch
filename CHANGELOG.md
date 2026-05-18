@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.4] - 2026-05-18
+
+### Added in 2.2.4
+
+- **Preset import button**: the Presets settings page now has an "Import HandBrake JSON" button next to "Create preset", allowing users to import preset files exported from HandBrake or from Clutch itself.
+
+### Fixed in 2.2.4
+
+- **Preset import failing with "Preset name not found"**: the import endpoint was not unwrapping the `{document: ...}` envelope sent by the frontend, causing all imports to fail.
+- **HandBrake encoder names rejected on import**: importing a HandBrake preset with encoders not native to Clutch (e.g. `ff_prores`) now maps them to the closest supported encoder instead of returning a validation error.
+
 ## [2.2.3] - 2026-05-13
 
 ### Fixed in 2.2.3

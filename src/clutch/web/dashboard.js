@@ -6105,6 +6105,19 @@
         var createBtn = document.getElementById('preset-create-wizard-btn');
         if (createBtn) createBtn.addEventListener('click', openWizard);
 
+        // "Import" button triggers hidden file input
+        var importBtn = document.getElementById('preset-import-btn');
+        var importFileInput = document.getElementById('preset-import-file');
+        if (importBtn && importFileInput) {
+            importBtn.addEventListener('click', function () { importFileInput.click(); });
+            importFileInput.addEventListener('change', function () {
+                if (importFileInput.files && importFileInput.files[0]) {
+                    importPreset(importFileInput.files[0]);
+                    importFileInput.value = '';
+                }
+            });
+        }
+
         // Close wizard
         var closeBtn = document.getElementById('wizard-close-btn');
         if (closeBtn) closeBtn.addEventListener('click', closeWizard);

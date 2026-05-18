@@ -1498,7 +1498,13 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
             if not user:
                 return
             try:
-                document = self._read_json()
+                payload = self._read_json()
+                # The frontend wraps the preset in {"document": ...}; unwrap if present.
+                if isinstance(payload, dict) and "document" in payload:
+                    document = payload["document"]
+                else:
+                    document = payload
+                debug(f"[preset-import] HTTP handler received document keys: {list(document.keys()) if isinstance(document, dict) else type(document).__name__}")
                 preset = self.server.service.import_preset_from_handbrake(document)
             except json.JSONDecodeError as exc:
                 self._send_json(400, {"error": f"Invalid JSON: {exc}"})

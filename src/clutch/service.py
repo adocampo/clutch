@@ -895,21 +895,56 @@ class ConversionService:
 
     def import_preset_from_handbrake(self, document: Dict[str, object]) -> Dict[str, object]:
         """Translate a HandBrake-format preset JSON into our curated schema and persist it."""
+        debug(f"[preset-import] Received document type={type(document).__name__}, keys={list(document.keys()) if isinstance(document, dict) else 'N/A'}")
         if not isinstance(document, dict):
+            debug(f"[preset-import] REJECTED: document is not a dict, got {type(document).__name__}")
             raise ValueError("Invalid HandBrake preset document.")
         # HandBrake exports wrap the preset in {"PresetList": [{...}]} or as a bare object.
         preset_node = document
         preset_list = document.get("PresetList") if isinstance(document, dict) else None
+        debug(f"[preset-import] Top-level keys: {list(document.keys())}")
+        debug(f"[preset-import] PresetList type={type(preset_list).__name__}, len={len(preset_list) if isinstance(preset_list, list) else 'N/A'}")
         if isinstance(preset_list, list) and preset_list:
-            for entry in preset_list:
+            for i, entry in enumerate(preset_list):
+                debug(f"[preset-import] PresetList[{i}] type={type(entry).__name__}, keys={list(entry.keys()) if isinstance(entry, dict) else 'N/A'}, PresetName={entry.get('PresetName') if isinstance(entry, dict) else 'N/A'}")
                 if isinstance(entry, dict) and entry.get("PresetName"):
                     preset_node = entry
                     break
+        debug(f"[preset-import] Resolved preset_node keys: {list(preset_node.keys()) if isinstance(preset_node, dict) else 'N/A'}")
         name = str(preset_node.get("PresetName") or "").strip()
+        debug(f"[preset-import] Extracted name={repr(name)}")
         if not name:
+            print_error(f"[preset-import] FAILED: PresetName is empty or missing. preset_node sample: {str(preset_node)[:500]}")
             raise ValueError("Preset name not found in document.")
         description = str(preset_node.get("PresetDescription") or "").strip()
-        encoder = str(preset_node.get("VideoEncoder") or "").strip()
+        encoder_raw = str(preset_node.get("VideoEncoder") or "").strip()
+        # Map HandBrake encoder identifiers to Clutch equivalents
+        _HB_ENCODER_MAP = {
+            "x264": "x264", "x265": "x265", "x265_10bit": "x265_10bit",
+            "nvenc_h264": "nvenc_h264", "nvenc_h265": "nvenc_h265",
+            "nvenc_h265_10bit": "nvenc_h265_10bit",
+            "av1_nvenc": "av1_nvenc", "av1_qsv": "av1_qsv",
+            "qsv_h264": "qsv_h264", "qsv_h265": "qsv_h265",
+            "vt_h264": "vt_h264", "vt_h265": "vt_h265",
+            "VP9": "vp9", "vp9": "vp9",
+            "mpeg4": "mpeg4", "mpeg2": "mpeg2", "theora": "theora",
+            "svt_av1": "av1", "svt_av1_10bit": "av1",
+        }
+        encoder = _HB_ENCODER_MAP.get(encoder_raw, "")
+        if not encoder:
+            # Heuristic fallback for unrecognized HandBrake encoders
+            low = encoder_raw.lower()
+            if "265" in low or "hevc" in low:
+                encoder = "x265"
+            elif "264" in low or "avc" in low:
+                encoder = "x264"
+            elif "av1" in low:
+                encoder = "av1"
+            elif "vp9" in low:
+                encoder = "vp9"
+            else:
+                encoder = "x265"
+            debug(f"[preset-import] Unknown encoder {encoder_raw!r}, mapped to {encoder!r}")
         quality = preset_node.get("VideoQualitySlider")
         bitrate = preset_node.get("VideoAvgBitrate")
         params = {
