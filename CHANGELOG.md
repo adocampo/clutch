@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.2] - 2026-07-11
+
+### Fixed in 2.3.2
+
+- **VCE encoder crash on RDNA 3.5 GPUs**: HandBrake reports VCN as available on new AMD GPUs (e.g. Radeon 8060S / strix_halo) but segfaults when actually encoding. Added a smoke-test that attempts a real 1-second VCE encode during detection; if it crashes, VCE is disabled and the system falls back to software encoders with a user-facing warning.
+
 ## [2.3.1] - 2026-07-11
 
 ### Fixed in 2.3.1

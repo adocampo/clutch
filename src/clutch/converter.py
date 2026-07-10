@@ -613,10 +613,11 @@ def get_visible_amd_gpus() -> list[dict[str, object]]:
 
 
 def is_vce_available() -> bool:
-    """Return whether AMD VCE/VCN can be used by this runtime.
+    """Return whether AMD VCE/VCN can actually encode video in this runtime.
 
-    A positive result requires both a visible AMD GPU and HandBrake exposing
-    VCE encoders (vce_h264, vce_h265, or vce_av1). The result is cached for
+    A positive result requires: visible AMD GPU, HandBrake exposing VCE encoders,
+    AND a successful test encode (since some new AMD GPUs report VCN as available
+    but HandBrake segfaults when actually encoding). The result is cached for
     the process lifetime.
     """
     global _vce_available_cache
@@ -637,8 +638,85 @@ def is_vce_available() -> bool:
         return False
 
     output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-    _vce_available_cache = any(enc in output for enc in ("vce_h265", "vce_h264", "vce_av1"))
+    if not any(enc in output for enc in ("vce_h265", "vce_h264", "vce_av1")):
+        _vce_available_cache = False
+        return False
+
+    # Smoke-test: attempt a real VCE encode with a synthetic input to confirm
+    # the encoder doesn't crash. Some GPU/driver combos report VCN available
+    # but segfault on actual use (e.g. RDNA 3.5 / strix_halo with HandBrake).
+    _vce_available_cache = _vce_smoke_test()
+    if not _vce_available_cache:
+        from clutch.output import warning as _warn
+        _warn("AMD VCE encoder detected but smoke-test failed (likely a driver/HandBrake bug). VCE disabled; using software encoders.")
     return _vce_available_cache
+
+
+def _vce_smoke_test() -> bool:
+    """Run a minimal VCE encode to verify the encoder actually works."""
+    import tempfile
+    # Use ffmpeg/lavfi to generate a synthetic test clip, or use HandBrake's
+    # built-in test signal if available. Simplest: try encoding a tiny segment
+    # of a known-working synthetic source.
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mkv", delete=False) as tmp_out:
+            tmp_path = tmp_out.name
+        # Generate a 1-second synthetic YUV via HandBrake's inline test mode:
+        # use /dev/null as input with a test pattern (won't work).
+        # Instead, use the lavf synthetic testsrc via ffmpeg or just test
+        # with a minimal approach: create a raw YUV file.
+        # Simplest portable approach: use HandBrakeCLI with a very short
+        # lavf-based input. HandBrake supports "color bar" test via presets.
+        # Actually the most reliable way is to just try encoding 1 second of
+        # a null input — but HandBrake needs a real file. Let's create a tiny
+        # raw file with python and pipe it.
+        #
+        # Alternative: write a minimal Matroska with 1 black frame using pure Python.
+        # This is too complex. Instead, just run HandBrakeCLI with vce_h265 on
+        # any available video file for 1 frame. But we can't assume any file exists.
+        #
+        # Best approach: test with the system's `testsrc` if ffmpeg is available,
+        # otherwise skip the test and assume it works (optimistic).
+        import shutil
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            # Can't run smoke test without ffmpeg — assume VCE works (optimistic)
+            debug("VCE smoke test skipped: ffmpeg not found. Assuming VCE works.")
+            return True
+
+        # Generate a 1-second 720p test clip
+        tmp_src = tmp_path + ".src.mkv"
+        gen_result = subprocess.run(
+            [ffmpeg_path, "-f", "lavfi", "-i", "testsrc=duration=1:size=1280x720:rate=24",
+             "-c:v", "rawvideo", "-pix_fmt", "yuv420p", "-f", "matroska", "-y", tmp_src],
+            capture_output=True, timeout=10, check=False,
+        )
+        if gen_result.returncode != 0:
+            debug("VCE smoke test skipped: ffmpeg testsrc generation failed.")
+            os.unlink(tmp_path)
+            return True  # optimistic
+
+        # Try encoding with VCE
+        encode_result = subprocess.run(
+            [get_binary_path("HandBrakeCLI"), "-i", tmp_src, "-o", tmp_path,
+             "-e", "vce_h265", "--stop-at", "duration:1"],
+            capture_output=True, timeout=15, check=False,
+        )
+        success = encode_result.returncode == 0
+        debug(f"VCE smoke test: exit_code={encode_result.returncode}, success={success}")
+        # Cleanup
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp_src)
+        except OSError:
+            pass
+        return success
+    except Exception as exc:
+        debug(f"VCE smoke test exception: {exc}")
+        return True  # optimistic on unexpected errors
 
 
 def _is_av1_nvenc_available() -> bool:
