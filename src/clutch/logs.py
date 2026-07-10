@@ -514,7 +514,7 @@ def _collect_system_stats() -> Dict[str, object]:
 
     stats["disks"] = disks
 
-    # ── GPUs (nvidia-smi) ──
+    # ── GPUs (nvidia-smi + AMD sysfs) ──
     gpus: List[Dict[str, object]] = []
     try:
         result = subprocess.run(
@@ -552,6 +552,69 @@ def _collect_system_stats() -> Dict[str, object]:
             })
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
+
+    # AMD GPUs via sysfs (amdgpu driver)
+    import glob as _glob
+    for hwmon_dir in sorted(_glob.glob("/sys/class/drm/card*/device/hwmon/hwmon*")):
+        driver_path = os.path.join(os.path.dirname(os.path.dirname(hwmon_dir)), "driver")
+        try:
+            driver = os.path.basename(os.readlink(driver_path))
+        except OSError:
+            continue
+        if driver != "amdgpu":
+            continue
+
+        def _read_sysfs(path: str) -> Optional[str]:
+            try:
+                with open(path) as f:
+                    return f.read().strip()
+            except OSError:
+                return None
+
+        device_dir = os.path.dirname(os.path.dirname(hwmon_dir))
+        # GPU name from marketing name or product name
+        name = _read_sysfs(os.path.join(device_dir, "product_name")) or ""
+        if not name:
+            # Try lspci-style name from uevent
+            uevent = _read_sysfs(os.path.join(device_dir, "uevent")) or ""
+            for line in uevent.splitlines():
+                if line.startswith("PCI_SLOT_NAME="):
+                    name = f"AMD GPU ({line.split('=', 1)[1]})"
+                    break
+            if not name:
+                name = "AMD GPU"
+
+        # VRAM
+        vram_total = _read_sysfs(os.path.join(device_dir, "mem_info_vram_total"))
+        vram_used = _read_sysfs(os.path.join(device_dir, "mem_info_vram_used"))
+        mem_total_mib = int(vram_total) // (1024 * 1024) if vram_total and vram_total.isdigit() else None
+        mem_used_mib = int(vram_used) // (1024 * 1024) if vram_used and vram_used.isdigit() else None
+
+        # Temperature
+        temp_raw = _read_sysfs(os.path.join(hwmon_dir, "temp1_input"))
+        temp_c = int(temp_raw) // 1000 if temp_raw and temp_raw.isdigit() else None
+
+        # GPU busy percentage
+        busy_raw = _read_sysfs(os.path.join(device_dir, "gpu_busy_percent"))
+        utilization_pct = int(busy_raw) if busy_raw and busy_raw.isdigit() else None
+
+        # Fan
+        fan_raw = _read_sysfs(os.path.join(hwmon_dir, "pwm1"))
+        fan_max = _read_sysfs(os.path.join(hwmon_dir, "pwm1_max"))
+        fan_pct = None
+        if fan_raw and fan_max and fan_raw.isdigit() and fan_max.isdigit() and int(fan_max) > 0:
+            fan_pct = round(int(fan_raw) * 100 / int(fan_max))
+
+        gpus.append({
+            "index": len(gpus),
+            "name": name,
+            "mem_total_mib": mem_total_mib,
+            "mem_used_mib": mem_used_mib,
+            "utilization_pct": utilization_pct,
+            "temp_c": temp_c,
+            "fan_pct": fan_pct,
+        })
+
     stats["gpus"] = gpus
 
     return stats

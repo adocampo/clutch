@@ -785,6 +785,17 @@ def _is_unknown_video_codec_hw_error(hb_error_detail: str) -> bool:
     return _is_unknown_video_codec_nvenc_error(hb_error_detail) or _is_unknown_video_codec_vce_error(hb_error_detail)
 
 
+def _get_source_bit_depth(media_info_data: dict | None) -> str:
+    """Extract video bit depth from mediainfo JSON data. Returns '8', '10', '12' etc. or ''."""
+    if not isinstance(media_info_data, dict):
+        return ""
+    tracks = media_info_data.get("media", {}).get("track", [])
+    for t in tracks:
+        if t.get("@type") == "Video":
+            return str(t.get("BitDepth", ""))
+    return ""
+
+
 def generate_unique_filename(base_name: str, extension: str, output_path: str) -> str:
     counter = 1
     output_file = os.path.join(output_path, f"{base_name}.{extension}")
@@ -1279,6 +1290,28 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             debug(f"convert_video: aborting — could not determine resolution for {os.path.basename(input_file)}")
             _set_failure_reason(f"Could not determine video resolution for {os.path.basename(input_file)}.")
             return ""
+
+    # Auto-upgrade VCE encoders to 10-bit variant for HDR/10-bit sources.
+    # Without this, HandBrake segfaults when feeding 10-bit content to 8-bit VCE encoders.
+    if media_info_data and not is_iso:
+        source_bit_depth = _get_source_bit_depth(media_info_data)
+        if source_bit_depth and int(source_bit_depth) > 8:
+            codec_lower = str(codec or "").strip().lower()
+            if codec_lower in ("vce_h265", "vce_av1") and not codec_lower.endswith("_10bit"):
+                codec = f"{codec}_10bit"
+                debug(f"Source is {source_bit_depth}-bit; upgraded encoder to {codec}")
+            elif codec_lower == "nvenc_h265" and not codec_lower.endswith("_10bit"):
+                codec = "nvenc_h265_10bit"
+                debug(f"Source is {source_bit_depth}-bit; upgraded encoder to {codec}")
+            # Also upgrade in preset_params if present
+            if preset_params and isinstance(preset_params.get("video"), dict):
+                enc = str(preset_params["video"].get("encoder") or "").strip().lower()
+                if enc in ("vce_h265", "vce_av1") and not enc.endswith("_10bit"):
+                    preset_params["video"]["encoder"] = f"{enc}_10bit"
+                    debug(f"Preset encoder upgraded to {enc}_10bit for {source_bit_depth}-bit source")
+                elif enc == "nvenc_h265" and not enc.endswith("_10bit"):
+                    preset_params["video"]["encoder"] = "nvenc_h265_10bit"
+                    debug(f"Preset encoder upgraded to nvenc_h265_10bit for {source_bit_depth}-bit source")
 
     # Build audio parameters
     audio_params = []

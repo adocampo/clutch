@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.1] - 2026-07-11
+
+### Fixed in 2.3.1
+
+- **VCE segfault on 10-bit/HDR content**: HandBrake crashes (SIGSEGV) when feeding 10-bit HDR video to 8-bit VCE encoders. Clutch now auto-detects the source bit depth and upgrades to the `_10bit` encoder variant (e.g. `vce_h265` → `vce_h265_10bit`, `vce_av1` → `vce_av1_10bit`). Same logic applies to `nvenc_h265` → `nvenc_h265_10bit`.
+- **AMD GPU not shown in About/System Monitor**: the system stats collector only queried `nvidia-smi`. Now also reads AMD GPU data from sysfs (amdgpu driver): VRAM usage, temperature, GPU utilization, and fan speed.
+
 ## [2.3.0] - 2026-07-11
 
 ### Added in 2.3.0
