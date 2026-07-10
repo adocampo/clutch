@@ -784,6 +784,105 @@ class AuthStore:
                 "DELETE FROM password_resets WHERE used = 1 OR expires_at <= ?", (now,)
             )
 
+    # ── Export / Import ──
+
+    def export_auth(self) -> Dict[str, object]:
+        """Export all auth data: users (with password hashes), SMTP config.
+
+        Tokens and password resets are NOT exported (they are ephemeral).
+        """
+        with self._lock:
+            users = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT id, username, email, password_hash, role, created_at, updated_at "
+                    "FROM users ORDER BY id"
+                ).fetchall()
+            ]
+            smtp_row = self._conn.execute(
+                "SELECT * FROM smtp_config WHERE singleton = 1"
+            ).fetchone()
+            smtp = dict(smtp_row) if smtp_row else {}
+            smtp.pop("singleton", None)
+
+            prefs = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT * FROM user_preferences"
+                ).fetchall()
+            ]
+
+        return {
+            "users": users,
+            "smtp_config": smtp,
+            "user_preferences": prefs,
+        }
+
+    def import_auth(self, data: Dict[str, object]):
+        """Import auth data, overwriting existing users and SMTP config.
+
+        Password hashes are imported as-is (they were exported in hashed form).
+        """
+        with self._lock, self._conn:
+            # Users — clear and re-insert
+            users = data.get("users")
+            if isinstance(users, list):
+                self._conn.execute("DELETE FROM user_preferences")
+                self._conn.execute("DELETE FROM auth_tokens")
+                self._conn.execute("DELETE FROM password_resets")
+                self._conn.execute("DELETE FROM users")
+                for u in users:
+                    if not isinstance(u, dict) or not u.get("username"):
+                        continue
+                    self._conn.execute(
+                        "INSERT INTO users (id, username, email, password_hash, role, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            u.get("id"),
+                            u["username"],
+                            u.get("email", ""),
+                            u.get("password_hash", ""),
+                            u.get("role", "viewer"),
+                            u.get("created_at", ""),
+                            u.get("updated_at", ""),
+                        ),
+                    )
+
+            # SMTP config
+            smtp = data.get("smtp_config")
+            if isinstance(smtp, dict) and any(smtp.values()):
+                smtp.pop("singleton", None)
+                self._conn.execute(
+                    "INSERT INTO smtp_config (singleton, host, port, username, password, use_tls, from_address) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(singleton) DO UPDATE SET "
+                    "host=excluded.host, port=excluded.port, username=excluded.username, "
+                    "password=excluded.password, use_tls=excluded.use_tls, from_address=excluded.from_address",
+                    (
+                        str(smtp.get("host", "")),
+                        int(smtp.get("port", 587)),
+                        str(smtp.get("username", "")),
+                        str(smtp.get("password", "")),
+                        int(smtp.get("use_tls", 1)),
+                        str(smtp.get("from_address", "")),
+                    ),
+                )
+
+            # User preferences
+            prefs = data.get("user_preferences")
+            if isinstance(prefs, list):
+                for p in prefs:
+                    if not isinstance(p, dict) or not p.get("user_id"):
+                        continue
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO user_preferences (user_id, theme, language, date_format) "
+                        "VALUES (?, ?, ?, ?)",
+                        (
+                            p["user_id"],
+                            p.get("theme", ""),
+                            p.get("language", ""),
+                            p.get("date_format", ""),
+                        ),
+                    )
+
 
 # ── Role checking utilities ──
 

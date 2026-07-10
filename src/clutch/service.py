@@ -30,15 +30,20 @@ from clutch.converter import (
     get_current_conversion_paused_seconds,
     get_current_conversion_output_size,
     get_last_failure_reason,
+    get_visible_amd_gpus,
     get_visible_nvidia_gpus,
     is_conversion_process_alive,
+    is_nvenc_available,
+    is_vce_available,
     parse_gpu_devices,
     request_conversion_pause_by_pid,
     request_conversion_stop_by_pid,
     request_current_conversion_pause,
     request_current_conversion_resume,
     request_current_conversion_stop,
+    resolve_av1_encoder,
     uses_nvenc_encoder,
+    uses_vce_encoder,
 )
 from clutch.http_handler import ConversionHTTPServer, ServiceRequestHandler
 from clutch.iso import is_iso_file, scan_iso, select_main_title
@@ -856,7 +861,18 @@ class ConversionService:
     def list_watchers(self) -> List[Dict[str, object]]:
         with self._watchers_lock:
             watchers = list(self._watchers.values())
-        return [watcher.to_summary() for watcher in watchers]
+        summaries = [watcher.to_summary() for watcher in watchers]
+        for s in summaries:
+            s["preset_name"] = self._resolve_preset_name(s.get("preset_id") or "")
+        return summaries
+
+    def _resolve_preset_name(self, preset_id: str) -> str:
+        if not preset_id:
+            return ""
+        if preset_id.startswith("official:"):
+            return preset_id[9:]
+        preset = self.store.get_preset(preset_id)
+        return preset["name"] if preset else ""
 
     # ── Presets ─────────────────────────────────────────────────────
 
@@ -1083,7 +1099,9 @@ class ConversionService:
         return normalized
 
     def get_default_job_settings(self) -> Dict[str, object]:
-        return dict(self.default_job_settings)
+        settings = dict(self.default_job_settings)
+        settings["default_preset_name"] = self._resolve_preset_name(settings.get("default_preset_id") or "")
+        return settings
 
     def update_service_settings(self, payload: Dict[str, object]) -> Dict[str, object]:
         next_worker_count = self.worker_count
@@ -1828,6 +1846,12 @@ class ConversionService:
             "worker_count": self.worker_count,
             "gpu_devices": list(self.gpu_devices),
             "visible_nvidia_gpus": get_visible_nvidia_gpus(),
+            "visible_amd_gpus": get_visible_amd_gpus(),
+            "hw_encoders": {
+                "nvenc": is_nvenc_available(),
+                "vce": is_vce_available(),
+                "av1_gpu": resolve_av1_encoder() != "svt_av1",
+            },
             "update_info": self.get_update_info(force_check=force_update_check),
             "schedule_config": self.scheduler.config.to_dict(),
             "schedule_status": self.scheduler.get_status(),

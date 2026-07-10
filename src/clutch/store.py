@@ -1310,4 +1310,141 @@ class JobStore:
             updated = self._conn.execute("DELETE FROM presets WHERE id = ?", (preset_id,))
         return updated.rowcount == 1
 
+    # ── Export / Import ──
+
+    def export_config(self) -> Dict[str, object]:
+        """Export all configuration data as a JSON-serialisable dict.
+
+        Includes: service_config, presets, watchers, notification_channels.
+        Does NOT include jobs (transient) or auth data (handled by AuthStore).
+        """
+        with self._lock:
+            # service_config
+            row = self._conn.execute(
+                "SELECT * FROM service_config WHERE singleton = 1"
+            ).fetchone()
+            service_config = dict(row) if row else {}
+            service_config.pop("singleton", None)
+
+            # presets
+            presets = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT * FROM presets ORDER BY name"
+                ).fetchall()
+            ]
+
+            # watchers
+            watchers = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT * FROM watchers ORDER BY directory"
+                ).fetchall()
+            ]
+
+            # notification_channels
+            channels = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT * FROM notification_channels ORDER BY name"
+                ).fetchall()
+            ]
+
+        return {
+            "service_config": service_config,
+            "presets": presets,
+            "watchers": watchers,
+            "notification_channels": channels,
+        }
+
+    def import_config(self, data: Dict[str, object]):
+        """Import configuration data, overwriting existing records.
+
+        Expects the same shape returned by ``export_config()``.
+        Auth data should be imported separately via ``AuthStore.import_auth()``.
+        """
+        with self._lock, self._conn:
+            # service_config
+            sc = data.get("service_config")
+            if isinstance(sc, dict):
+                sc.pop("singleton", None)
+                cols = {
+                    row["name"]
+                    for row in self._conn.execute("PRAGMA table_info(service_config)").fetchall()
+                }
+                cols.discard("singleton")
+                # Only set columns that exist in the current schema
+                valid = {k: v for k, v in sc.items() if k in cols}
+                if valid:
+                    set_clause = ", ".join(f"{k} = ?" for k in valid)
+                    self._conn.execute(
+                        f"UPDATE service_config SET {set_clause} WHERE singleton = 1",
+                        list(valid.values()),
+                    )
+
+            # presets — clear and re-insert
+            presets = data.get("presets")
+            if isinstance(presets, list):
+                self._conn.execute("DELETE FROM presets")
+                for p in presets:
+                    if not isinstance(p, dict) or not p.get("id"):
+                        continue
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO presets (id, name, description, base_preset, params_json, quick_access, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            p["id"],
+                            p.get("name", ""),
+                            p.get("description", ""),
+                            p.get("base_preset", ""),
+                            p.get("params_json", "{}"),
+                            int(p.get("quick_access", 0)),
+                            p.get("created_at", ""),
+                            p.get("updated_at", ""),
+                        ),
+                    )
+
+            # watchers — clear and re-insert
+            watchers = data.get("watchers")
+            if isinstance(watchers, list):
+                self._conn.execute("DELETE FROM watchers")
+                for w in watchers:
+                    if not isinstance(w, dict) or not w.get("id"):
+                        continue
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO watchers (id, directory, recursive, poll_interval, settle_time, delete_source, output_dir, codec, encode_speed, audio_passthrough, force, preset_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            w["id"],
+                            w.get("directory", ""),
+                            int(w.get("recursive", 0)),
+                            float(w.get("poll_interval", 5)),
+                            float(w.get("settle_time", 30)),
+                            int(w.get("delete_source", 0)),
+                            w.get("output_dir", ""),
+                            w.get("codec", ""),
+                            w.get("encode_speed", ""),
+                            w.get("audio_passthrough"),
+                            w.get("force"),
+                            w.get("preset_id"),
+                        ),
+                    )
+
+            # notification_channels — clear and re-insert
+            channels = data.get("notification_channels")
+            if isinstance(channels, list):
+                self._conn.execute("DELETE FROM notification_channels")
+                for ch in channels:
+                    if not isinstance(ch, dict) or not ch.get("id"):
+                        continue
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO notification_channels (id, type, name, enabled, config_json, events_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            ch["id"],
+                            ch.get("type", ""),
+                            ch.get("name", ""),
+                            int(ch.get("enabled", 1)),
+                            ch.get("config_json", "{}"),
+                            ch.get("events_json", "[]"),
+                        ),
+                    )
+
 

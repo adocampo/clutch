@@ -747,7 +747,7 @@ def main():
     # ── Encoding ─────────────────────────────
     enc_group = parser.add_argument_group("encoding")
     enc_group.add_argument("-c", "--codec", default="nvenc_h265",
-                           help="Video codec: nvenc_h265 (default), nvenc_h264, av1, x265.")
+                           help="Video codec: nvenc_h265 (default), nvenc_h264, vce_h265, vce_h264, av1_auto (GPU auto-detect), svt_av1 (CPU), x265.")
     enc_group.add_argument("--preset", default="",
                            help="Use a saved preset by name (custom or official HandBrake preset).")
     enc_group.add_argument("-s", "--slow", action="store_true", help="Use slow encoding speed.")
@@ -758,7 +758,7 @@ def main():
     enc_group.add_argument("--force", action="store_true",
                            help="Force conversion even if file is already in the target codec.")
     enc_group.add_argument("--gpus", default="",
-                           help="Comma-separated NVENC GPU indices to use. Example: 0,1 rotates jobs across GPU 0 and GPU 1.")
+                           help="Comma-separated GPU indices to use (NVENC). Example: 0,1 rotates jobs across GPU 0 and GPU 1.")
 
     # ── Behaviour ────────────────────────────
     beh_group = parser.add_argument_group("behaviour")

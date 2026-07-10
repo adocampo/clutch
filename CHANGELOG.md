@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.0] - 2026-07-11
+
+### Added in 2.3.0
+
+- **AMD GPU support (VCE/VCN)**: full support for AMD hardware encoders — `vce_h265`, `vce_h264`, and `vce_av1` for RDNA 3+ GPUs. Auto-detection via `lspci`/sysfs with automatic fallback to software encoders when hardware is not available.
+- **`av1_auto` virtual codec**: a new "AV1 (GPU)" option that auto-detects the best AV1 hardware encoder available (AMD VCE > NVIDIA NVENC > Intel QSV) and falls back to SVT-AV1 (CPU) when no GPU AV1 support exists.
+- **Hardware-aware codec dropdowns**: the dashboard now filters codec options based on detected hardware — NVIDIA options hidden on AMD systems and vice versa. A warning indicator (⚠️ → CPU) appears on "AV1 (GPU)" when no GPU AV1 encoder is available.
+- **Configuration backup & restore** (Settings → Backup): export all settings, presets, users, SMTP config, notification channels, and watchers as a JSON file. Import on another instance to replicate the full configuration.
+- **Human-readable codec labels**: dropdowns now show "H.265 (NVIDIA)", "AV1 (GPU)", "H.264 (CPU)" etc. instead of raw encoder identifiers.
+- **H.264 (CPU)** option added to all codec dropdowns for maximum device compatibility.
+
+### Fixed in 2.3.0
+
+- **False-positive AMD GPU detection**: the `lspci` parser no longer matches "Corporation" as containing "ati" — uses word-boundary regex.
+- **Custom select showing hidden options**: the styled dropdown now skips `hidden`/`disabled` options.
+- **`settings/backup` route not recognized**: added to the SPA router's valid pages list.
+
 ## [2.2.5] - 2026-05-18
 
 ### Fixed in 2.2.5

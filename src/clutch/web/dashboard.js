@@ -206,12 +206,18 @@
     function resolvePresetLabel(record) {
         var pid = record.preset_id || '';
         if (!pid) return (record.codec || '') + ' / ' + (record.encode_speed || '');
+        // Use server-provided preset name if available
+        if (record.preset_name) return record.preset_name;
         // Official preset: "official:Name" → show the name
         if (pid.startsWith('official:')) return pid.substring(9);
-        // Custom preset: look up in cached list by id
-        var presets = (typeof presetsState !== 'undefined' && presetsState.quickAccess) || [];
-        for (var i = 0; i < presets.length; i++) {
-            if (presets[i].id === pid) return presets[i].name;
+        // Custom preset: look up in cached lists by id
+        var lists = (typeof presetsState !== 'undefined')
+            ? [presetsState.quickAccess || [], presetsState.custom || []]
+            : [[]];
+        for (var li = 0; li < lists.length; li++) {
+            for (var i = 0; i < lists[li].length; i++) {
+                if (lists[li][i].id === pid) return lists[li][i].name;
+            }
         }
         // Fallback: show codec/speed from the job record if available
         if (record.codec) return (record.codec || '') + ' / ' + (record.encode_speed || '');
@@ -417,10 +423,13 @@
             var current = selectEl.dataset.wantedValue || selectEl.value;
             optionsPanel.innerHTML = '';
             Array.prototype.forEach.call(selectEl.options, function (opt) {
+                if (opt.hidden || opt.disabled) return;
                 var btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'custom-select-option' + (opt.value === current ? ' selected' : '');
+                if (opt.title) btn.className += ' has-warning';
                 btn.textContent = opt.textContent;
+                if (opt.title) btn.title = opt.title;
                 btn.dataset.value = opt.value;
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
@@ -1343,7 +1352,7 @@
 
     var validPages = [
         'activity', 'jobs', 'watchers', 'schedule',
-        'settings/general', 'settings/binaries', 'settings/media', 'settings/presets', 'settings/smtp', 'settings/notifications', 'settings/logs', 'settings/user',
+        'settings/general', 'settings/binaries', 'settings/media', 'settings/presets', 'settings/smtp', 'settings/notifications', 'settings/logs', 'settings/backup', 'settings/user',
         'system/users', 'system/logs', 'system/tasks', 'system/changelog', 'system/about',
     ];
 
@@ -2169,10 +2178,61 @@
         tracker.btn.disabled = true;
     }
 
+    /**
+     * Hide codec options whose hardware is not available on this system.
+     * Options with data-hw="nvenc" are hidden when NVENC is not available;
+     * options with data-hw="vce" are hidden when VCE is not available.
+     * If a select's current value gets hidden, it falls back to the first visible option.
+     * Also marks options that will silently fall back to CPU with a warning suffix.
+     */
+    function filterCodecSelectsByHardware(hwEncoders) {
+        if (!hwEncoders) return;
+        var hasNvenc = Boolean(hwEncoders.nvenc);
+        var hasVce = Boolean(hwEncoders.vce);
+        var hasAv1Gpu = Boolean(hwEncoders.av1_gpu);
+        document.querySelectorAll('[data-codec-select]').forEach(function (sel) {
+            var currentValue = sel.value;
+            var currentHidden = false;
+            Array.from(sel.options).forEach(function (opt) {
+                var hw = opt.getAttribute('data-hw');
+                // Hide HW-specific H.264/H.265 options when that GPU brand is absent
+                if (hw) {
+                    var hide = (hw === 'nvenc' && !hasNvenc) || (hw === 'vce' && !hasVce);
+                    opt.hidden = hide;
+                    opt.disabled = hide;
+                    if (hide && opt.value === currentValue) currentHidden = true;
+                } else {
+                    opt.hidden = false;
+                    opt.disabled = false;
+                }
+                // Mark AV1 (GPU) with fallback warning if no GPU AV1 support
+                if (opt.value === 'av1_auto' && !hasAv1Gpu) {
+                    opt.textContent = 'AV1 (GPU) \u26a0\ufe0f \u2192 CPU';
+                    opt.title = 'No GPU AV1 encoder detected. Will use SVT-AV1 (CPU) as fallback.';
+                } else if (opt.value === 'av1_auto' && hasAv1Gpu) {
+                    opt.textContent = 'AV1 (GPU)';
+                    opt.title = '';
+                }
+            });
+            if (currentHidden) {
+                // Pick first visible option
+                for (var i = 0; i < sel.options.length; i++) {
+                    if (!sel.options[i].hidden && !sel.options[i].disabled) {
+                        sel.value = sel.options[i].value;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     function applySummaryToForms(summary) {
         const defaults = summary.default_job_settings || {};
         state.defaultJobSettings = defaults;
+        state._hwEncoders = summary.hw_encoders || {};
         setAllowedRoots(summary.allowed_roots || []);
+        // Filter codec selects based on detected hardware before setting values
+        filterCodecSelectsByHardware(summary.hw_encoders);
         settingsForm.elements.worker_count.value = String(summary.worker_count || 1);
         settingsForm.elements.gpu_devices.value = Array.isArray(summary.gpu_devices) ? summary.gpu_devices.join(',') : '';
         settingsForm.elements.default_output_dir.value = defaults.output_dir || '';
@@ -2263,21 +2323,60 @@
         }
 
         var rows = watchers.map(function (watcher) {
-            var overrides = [];
-            if (watcher.output_dir) overrides.push(i18n.t('watchers.override_output', {value: escapeHtml(watcher.output_dir)}));
-            if (watcher.codec) overrides.push(i18n.t('watchers.override_codec', {value: escapeHtml(watcher.codec)}));
-            if (watcher.encode_speed) overrides.push(i18n.t('watchers.override_speed', {value: escapeHtml(watcher.encode_speed)}));
-            if (watcher.audio_passthrough === true) overrides.push(i18n.t('watchers.override_audio'));
-            if (watcher.force === true) overrides.push(i18n.t('watchers.override_force'));
-            var overridesCell = overrides.length
-                ? `<span class="watcher-overrides">${overrides.join(' | ')}</span>`
-                : '<span class="watcher-details">—</span>';
             var isEditing = Boolean(state.editingWatcherId);
             var disabledAttr = isEditing ? ' disabled' : '';
+            var defs = state.defaultJobSettings || {};
+            var check = '\u2713';
+            var dash = '\u2014';
+
+            // Codec / Preset: watcher override → default preset → default codec
+            var codecCell, codecMuted = false;
+            if (watcher.preset_id) {
+                codecCell = escapeHtml(resolvePresetLabel(watcher));
+            } else if (watcher.codec) {
+                codecCell = escapeHtml(watcher.codec);
+            } else if (defs.default_preset_id) {
+                codecCell = escapeHtml(resolvePresetLabel({preset_id: defs.default_preset_id, preset_name: defs.default_preset_name || ''}));
+                codecMuted = true;
+            } else {
+                codecCell = escapeHtml(defs.codec || 'nvenc_h265');
+                codecMuted = true;
+            }
+
+            // Speed: watcher override → default (hidden if preset active)
+            var hasPreset = watcher.preset_id || (!watcher.codec && defs.default_preset_id);
+            var speedCell, speedMuted = false;
+            if (hasPreset) {
+                speedCell = '';
+            } else if (watcher.encode_speed) {
+                speedCell = escapeHtml(watcher.encode_speed);
+            } else {
+                speedCell = escapeHtml(defs.encode_speed || 'normal');
+                speedMuted = true;
+            }
+
+            // Output dir
+            var outputDir = watcher.output_dir || defs.output_dir || '';
+            var outputMuted = !watcher.output_dir && Boolean(outputDir);
+
+            // Booleans – explicit override wins, otherwise fall back to default
+            var audioPt = watcher.audio_passthrough === true || (watcher.audio_passthrough == null && Boolean(defs.audio_passthrough));
+            var deleteSrc = watcher.delete_source === true || (watcher.delete_source == null && Boolean(defs.delete_source));
+            var force = watcher.force === true || (watcher.force == null && Boolean(defs.force));
+
+            function muted(text) { return '<span class="watcher-muted">' + text + '</span>'; }
+
             return `<tr>
                         <td><span class="watcher-dir" title="${escapeHtml(watcher.directory)}">${escapeHtml(watcher.directory)}</span></td>
-                        <td class="watcher-details">${escapeHtml(i18n.t('watchers.detail_line', {recursive: String(watcher.recursive), poll: String(watcher.poll_interval), settle: String(watcher.settle_time), delete_src: String(Boolean(watcher.delete_source))}))}</td>
-                        <td>${overridesCell}</td>
+                        <td class="watcher-cell-path" title="${escapeHtml(outputDir)}">${outputDir ? (outputMuted ? muted(escapeHtml(outputDir)) : escapeHtml(outputDir)) : muted(dash)}</td>
+                        <td>${codecMuted ? muted(codecCell) : codecCell}</td>
+                        <td>${speedMuted ? muted(speedCell) : speedCell}</td>
+                        <td class="watcher-cell-center">${watcher.recursive ? check : dash}</td>
+                        <td class="watcher-cell-center">${escapeHtml(String(watcher.poll_interval))}s</td>
+                        <td class="watcher-cell-center">${escapeHtml(String(watcher.settle_time))}s</td>
+                        <td class="watcher-cell-center">${deleteSrc ? check : dash}</td>
+                        <td class="watcher-cell-center">${audioPt ? check : dash}</td>
+                        <td class="watcher-cell-center">${force ? check : dash}</td>
                         <td class="watcher-actions">
                             <button class="inline-button-warn" type="button" data-edit-watcher="${watcher.id}" title="${escapeHtml(i18n.t('watchers.edit_title'))}"${disabledAttr}>${i18n.t('common.edit')}</button>
                             <button class="inline-button" type="button" data-remove-watcher="${watcher.id}" title="${escapeHtml(i18n.t('watchers.remove_title'))}"${disabledAttr}>${i18n.t('common.remove')}</button>
@@ -2287,7 +2386,18 @@
 
         watchersContainer.innerHTML =
             '<div class="watcher-section-header">' + i18n.t('watchers.section_header') + '</div>' +
-            '<table class="watcher-table"><thead><tr><th>' + i18n.t('watchers.col_directory') + '</th><th>' + i18n.t('watchers.col_settings') + '</th><th>' + i18n.t('watchers.col_overrides') + '</th><th></th></tr></thead><tbody>' +
+            '<table class="watcher-table"><thead><tr>' +
+            '<th>' + i18n.t('watchers.col_directory') + '</th>' +
+            '<th>' + i18n.t('watchers.col_output') + '</th>' +
+            '<th>' + i18n.t('watchers.col_codec') + '</th>' +
+            '<th>' + i18n.t('watchers.col_speed') + '</th>' +
+            '<th>' + i18n.t('watchers.col_recursive') + '</th>' +
+            '<th>' + i18n.t('watchers.col_poll') + '</th>' +
+            '<th>' + i18n.t('watchers.col_settle') + '</th>' +
+            '<th>' + i18n.t('watchers.col_delete_src') + '</th>' +
+            '<th>' + i18n.t('watchers.col_audio_pt') + '</th>' +
+            '<th>' + i18n.t('watchers.col_force') + '</th>' +
+            '<th></th></tr></thead><tbody>' +
             rows + '</tbody></table>';
 
         Array.prototype.forEach.call(
@@ -4592,6 +4702,68 @@
         });
     }
 
+    // ── Backup: Export / Import ──────────────────────────────────────
+    var backupExportBtn = document.getElementById('backup-export-btn');
+    var backupExportStatus = document.getElementById('backup-export-status');
+    var backupImportBtn = document.getElementById('backup-import-btn');
+    var backupImportFile = document.getElementById('backup-import-file');
+    var backupImportStatus = document.getElementById('backup-import-status');
+
+    if (backupImportFile) {
+        backupImportFile.addEventListener('change', function () {
+            if (backupImportBtn) backupImportBtn.disabled = !backupImportFile.files.length;
+        });
+    }
+
+    if (backupExportBtn) {
+        backupExportBtn.addEventListener('click', async function () {
+            setStatus(backupExportStatus, i18n.t('settings.backup.exporting') || 'Exporting…');
+            try {
+                var resp = await fetch('/config/export', {
+                    headers: state.auth.token ? { 'Authorization': 'Bearer ' + state.auth.token } : {},
+                });
+                if (!resp.ok) {
+                    var err = await resp.json().catch(function () { return {}; });
+                    throw new Error(err.error || 'Export failed');
+                }
+                var blob = await resp.blob();
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                a.href = url;
+                a.download = 'clutch-backup-' + ts + '.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setStatus(backupExportStatus, i18n.t('settings.backup.export_ok') || 'Configuration exported.', 'ok');
+            } catch (err) {
+                setStatus(backupExportStatus, err.message, 'error');
+            }
+        });
+    }
+
+    if (backupImportBtn) {
+        backupImportBtn.addEventListener('click', async function () {
+            if (!backupImportFile || !backupImportFile.files.length) return;
+            if (!confirm(i18n.t('settings.backup.import_confirm') || 'This will overwrite all current settings. Continue?')) return;
+            setStatus(backupImportStatus, i18n.t('settings.backup.importing') || 'Importing…');
+            try {
+                var text = await backupImportFile.files[0].text();
+                JSON.parse(text); // validate JSON
+                await fetchJson('/config/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: text,
+                });
+                setStatus(backupImportStatus, i18n.t('settings.backup.import_ok') || 'Configuration imported. Reloading…', 'ok');
+                setTimeout(function () { location.reload(); }, 1500);
+            } catch (err) {
+                setStatus(backupImportStatus, err.message, 'error');
+            }
+        });
+    }
+
     watcherForm.addEventListener('submit', async function (event) {
         event.preventDefault();
         watcherButton.disabled = true;
@@ -5445,10 +5617,14 @@
     }
 
     var BUILTIN_PRESETS = [
-        { name: 'nvenc_h265', description: 'NVIDIA GPU H.265 encoder — best balance of speed and quality.', encoder: 'nvenc_h265', speeds: 'fast / normal / slow' },
-        { name: 'nvenc_h264', description: 'NVIDIA GPU H.264 encoder — broad device compatibility.', encoder: 'nvenc_h264', speeds: 'fast / normal / slow' },
-        { name: 'av1', description: 'AV1 software encoder — smallest files, very slow.', encoder: 'av1', speeds: 'fast / normal / slow' },
-        { name: 'x265', description: 'CPU H.265 encoder — great quality, slower than NVENC.', encoder: 'x265', speeds: 'fast / normal / slow' },
+        { name: 'H.265 (NVIDIA)', description: 'NVIDIA GPU H.265 encoder — fast hardware encoding.', encoder: 'nvenc_h265', speeds: 'fast / normal / slow', hw: 'nvenc' },
+        { name: 'H.264 (NVIDIA)', description: 'NVIDIA GPU H.264 encoder — broad device compatibility.', encoder: 'nvenc_h264', speeds: 'fast / normal / slow', hw: 'nvenc' },
+        { name: 'H.265 (AMD)', description: 'AMD GPU H.265 encoder — fast hardware encoding.', encoder: 'vce_h265', speeds: 'fast / normal / slow', hw: 'vce' },
+        { name: 'H.264 (AMD)', description: 'AMD GPU H.264 encoder — broad device compatibility.', encoder: 'vce_h264', speeds: 'fast / normal / slow', hw: 'vce' },
+        { name: 'AV1 (GPU)', description: 'AV1 hardware encoder — auto-detects AMD/NVIDIA/Intel GPU. Falls back to CPU if no GPU AV1 support.', encoder: 'av1_auto', speeds: 'fast / normal / slow' },
+        { name: 'AV1 (CPU)', description: 'SVT-AV1 software encoder — best compression, slower.', encoder: 'svt_av1', speeds: 'fast / normal / slow' },
+        { name: 'H.265 (CPU)', description: 'x265 software encoder — great quality, no GPU required.', encoder: 'x265', speeds: 'fast / normal / slow' },
+        { name: 'H.264 (CPU)', description: 'x264 software encoder — maximum compatibility, no GPU required.', encoder: 'x264', speeds: 'fast / normal / slow' },
     ];
 
     function renderBuiltinCard(preset) {
@@ -5485,12 +5661,23 @@
         return card;
     }
 
+    /** Return BUILTIN_PRESETS filtered by detected hardware. */
+    function getVisibleBuiltinPresets() {
+        var hw = (state._hwEncoders) || {};
+        return BUILTIN_PRESETS.filter(function (bp) {
+            if (!bp.hw) return true;
+            if (bp.hw === 'nvenc') return Boolean(hw.nvenc);
+            if (bp.hw === 'vce') return Boolean(hw.vce);
+            return true;
+        });
+    }
+
     function renderCustomPresets() {
         var container = presetEl('custom-presets-container');
         if (!container) return;
         container.innerHTML = '';
         // Always show built-in quick-access presets as read-only cards first
-        BUILTIN_PRESETS.forEach(function (bp) {
+        getVisibleBuiltinPresets().forEach(function (bp) {
             container.appendChild(renderBuiltinCard(bp));
         });
         presetsState.custom.forEach(function (preset) {
@@ -6152,7 +6339,7 @@
             var container = document.getElementById('wizard-codec-cards');
             if (!container) return;
             container.innerHTML = '';
-            BUILTIN_PRESETS.forEach(function (bp) {
+            getVisibleBuiltinPresets().forEach(function (bp) {
                 var card = document.createElement('button');
                 card.type = 'button';
                 card.className = 'wizard-card';
@@ -6379,8 +6566,7 @@
         return initAuth();
     }).then(function () {
         navigateTo(getPageFromHash());
-        refreshAll();
-        refreshQuickAccessPresets();
+        refreshQuickAccessPresets().then(function () { refreshAll(); });
         scheduleRefresh();
     }).catch(function () {
         // Auth redirect in progress — do not load dashboard data

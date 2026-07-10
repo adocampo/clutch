@@ -965,6 +965,11 @@ select.custom-select-source {
     color: #fff;
 }
 
+.custom-select-option.has-warning {
+    color: var(--text-muted, #b0a080);
+    font-style: italic;
+}
+
 textarea {
     min-height: 110px;
     resize: vertical;
@@ -1690,6 +1695,7 @@ button:disabled {
     padding: 6px 10px;
     border-bottom: 1px solid var(--panel-separator);
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .watcher-table td {
@@ -1707,14 +1713,21 @@ button:disabled {
     word-break: break-all;
 }
 
-.watcher-table .watcher-details {
-    color: var(--muted);
+.watcher-table .watcher-cell-path {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--accent);
     font-size: 0.74rem;
 }
 
-.watcher-table .watcher-overrides {
-    color: var(--accent);
-    font-size: 0.74rem;
+.watcher-table .watcher-cell-center {
+    text-align: center;
+}
+
+.watcher-table .watcher-muted {
+    color: var(--muted);
 }
 
 .watcher-table .watcher-actions {

@@ -5,7 +5,7 @@ A *custom preset* is a JSON document with this shape::
     {
         "handbrake_preset": "H.265 NVENC 2160p 4K",  # optional base official preset
         "video": {
-            "encoder": "x265|x264|nvenc_h265|nvenc_h264|av1|av1_nvenc|vp9|...",
+            "encoder": "x265|x264|nvenc_h265|nvenc_h264|vce_h265|vce_h264|vce_av1|av1|av1_nvenc|vp9|...",
             "quality_mode": "crf|abr",
             "quality_value": 22,            # CRF (lower = better) or kbps when abr
             "encoder_preset": "slow|medium|fast|p1..p7|...",
@@ -95,7 +95,9 @@ DEFAULT_PRESET_PARAMS: Dict[str, Dict[str, object]] = {
 ALLOWED_VALUES: Dict[str, set] = {
     "video.encoder": {
         "x264", "x265", "x265_10bit", "nvenc_h264", "nvenc_h265", "nvenc_h265_10bit",
-        "av1", "av1_nvenc", "av1_qsv", "vp9", "vp9_10bit", "qsv_h264", "qsv_h265",
+        "av1", "av1_auto", "av1_nvenc", "av1_qsv", "svt_av1", "svt_av1_10bit",
+        "vce_h264", "vce_h265", "vce_av1",
+        "vp9", "vp9_10bit", "qsv_h264", "qsv_h265",
         "vt_h264", "vt_h265", "mpeg2", "mpeg4", "theora",
     },
     "video.quality_mode": {"crf", "abr"},

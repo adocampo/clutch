@@ -20,8 +20,15 @@ CODEC_QUALITY = {
 CODEC_TO_FORMAT = {
     'nvenc_h264': 'AVC',
     'nvenc_h265': 'HEVC',
+    'vce_h264': 'AVC',
+    'vce_h265': 'HEVC',
+    'vce_av1': 'AV1',
+    'av1_nvenc': 'AV1',
+    'av1_qsv': 'AV1',
+    'av1_auto': 'AV1',
     'x265': 'HEVC',
     'av1': 'AV1',
+    'svt_av1': 'AV1',
 }
 
 

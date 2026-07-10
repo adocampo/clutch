@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import signal as _signal
+from datetime import datetime, timezone
 import tempfile
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,9 +15,11 @@ from clutch import APP_NAME, get_version
 from clutch.auth import has_role
 from clutch.converter import (
     convert_video,
+    get_visible_amd_gpus,
     get_visible_nvidia_gpus,
     parse_gpu_devices,
     uses_nvenc_encoder,
+    uses_vce_encoder,
 )
 from clutch.iso import display_titles, is_iso_file, scan_iso
 from clutch.logs import (
@@ -1229,6 +1232,28 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"channels": self.server.service.notifications.list_channels()})
             return
 
+        if path == "/config/export":
+            user = self._require_role("admin")
+            if not user:
+                return
+            svc = self.server.service
+            export_data = {
+                "clutch_export_version": 1,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "app_version": get_version(),
+            }
+            export_data.update(svc.store.export_config())
+            export_data.update({"auth": svc.auth.export_auth()})
+            payload = json.dumps(export_data, indent=2, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition", 'attachment; filename="clutch-backup.json"')
+            self.send_header("Content-Length", str(len(payload.encode("utf-8"))))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload.encode("utf-8"))
+            return
+
         self._send_json(404, {"error": "Not found."})
 
     def do_POST(self):
@@ -1428,6 +1453,32 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(200, result)
+            return
+
+        if path == "/config/import":
+            user = self._require_role("admin")
+            if not user:
+                return
+            try:
+                payload = self._read_json()
+                if not isinstance(payload, dict) or payload.get("clutch_export_version") != 1:
+                    self._send_json(400, {"error": "Invalid backup file. Expected a Clutch export (version 1)."})
+                    return
+                svc = self.server.service
+                svc.store.import_config(payload)
+                auth_data = payload.get("auth")
+                if isinstance(auth_data, dict):
+                    svc.auth.import_auth(auth_data)
+                # Reload service state from the database
+                config = svc.store.load_service_config()
+                if config:
+                    svc.update_service_settings(config)
+                info(f"Configuration imported from backup (exported {payload.get('exported_at', 'unknown')}).")
+                self._send_json(200, {"ok": True, "message": "Configuration imported successfully."})
+            except json.JSONDecodeError as exc:
+                self._send_json(400, {"error": f"Invalid JSON: {exc}"})
+            except Exception as exc:
+                self._send_json(500, {"error": f"Import failed: {exc}"})
             return
 
         if path == "/config":

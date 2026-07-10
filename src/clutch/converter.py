@@ -75,6 +75,7 @@ _last_failure_reason: dict[int, str] = {}  # thread_id -> last failure detail
 _last_sigint_time: float = 0.0
 _DOUBLE_PRESS_INTERVAL = 1.5  # seconds
 _nvenc_available_cache: Optional[bool] = None
+_vce_available_cache: Optional[bool] = None
 
 
 def get_last_failure_reason() -> str:
@@ -562,6 +563,149 @@ def is_nvenc_available() -> bool:
     return _nvenc_available_cache
 
 
+def get_visible_amd_gpus() -> list[dict[str, object]]:
+    """Return visible AMD GPUs detected through lspci or sysfs.
+
+    Looks for AMD/ATI VGA or Display controllers. Falls back to scanning
+    /sys/class/drm for AMD render nodes.
+    """
+    devices: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    # Try lspci first
+    try:
+        result = _debug_run(
+            ["lspci", "-nn"],
+            check=False,
+            timeout=5,
+        )
+        for line in (result.stdout or "").splitlines():
+            lower = line.lower()
+            if not ("vga" in lower or "display" in lower):
+                continue
+            # Match AMD/ATI vendor names but not substrings like "Corporation"
+            if re.search(r'\bamd\b', lower) or re.search(r'\bati\b', lower):
+                name = line.strip()
+                if name not in seen:
+                    seen.add(name)
+                    devices.append({"index": len(devices), "name": name, "memory": ""})
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+
+    if devices:
+        return devices
+
+    # Fallback: check sysfs for amdgpu driver
+    import glob as _glob
+    for card_dir in sorted(_glob.glob("/sys/class/drm/card*/device/driver")):
+        try:
+            driver = os.path.basename(os.readlink(card_dir))
+        except OSError:
+            continue
+        if driver == "amdgpu":
+            card = card_dir.split("/")[4]  # e.g. "card0"
+            name = f"AMD GPU ({card})"
+            if name not in seen:
+                seen.add(name)
+                devices.append({"index": len(devices), "name": name, "memory": ""})
+
+    return devices
+
+
+def is_vce_available() -> bool:
+    """Return whether AMD VCE/VCN can be used by this runtime.
+
+    A positive result requires both a visible AMD GPU and HandBrake exposing
+    VCE encoders (vce_h264, vce_h265, or vce_av1). The result is cached for
+    the process lifetime.
+    """
+    global _vce_available_cache
+    if _vce_available_cache is not None:
+        return _vce_available_cache
+
+    if not get_visible_amd_gpus():
+        _vce_available_cache = False
+        return False
+
+    try:
+        result = _debug_run(
+            [get_binary_path("HandBrakeCLI"), "--help"],
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        _vce_available_cache = False
+        return False
+
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    _vce_available_cache = any(enc in output for enc in ("vce_h265", "vce_h264", "vce_av1"))
+    return _vce_available_cache
+
+
+def _is_av1_nvenc_available() -> bool:
+    """Return whether NVIDIA AV1 NVENC is available (RTX 40xx+ / Ada Lovelace)."""
+    if not is_nvenc_available():
+        return False
+    try:
+        result = _debug_run(
+            [get_binary_path("HandBrakeCLI"), "--help"],
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return "av1_nvenc" in output
+
+
+def _is_av1_vce_available() -> bool:
+    """Return whether AMD VCE AV1 is available (RDNA 3+ / RX 7000+)."""
+    if not is_vce_available():
+        return False
+    try:
+        result = _debug_run(
+            [get_binary_path("HandBrakeCLI"), "--help"],
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return "vce_av1" in output
+
+
+def resolve_av1_encoder() -> str:
+    """Resolve the best available AV1 encoder for this system.
+
+    Priority: AMD VCE AV1 > NVIDIA AV1 NVENC > Intel QSV AV1 > SVT-AV1 (CPU).
+    Returns the HandBrake encoder identifier string.
+    """
+    if _is_av1_vce_available():
+        return "vce_av1"
+    if _is_av1_nvenc_available():
+        return "av1_nvenc"
+    # QSV AV1 check (Intel Arc)
+    try:
+        result = _debug_run(
+            [get_binary_path("HandBrakeCLI"), "--help"],
+            timeout=8,
+        )
+        output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        if "av1_qsv" in output:
+            return "av1_qsv"
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    return "svt_av1"
+
+
+def uses_vce_encoder(codec: str, encode_speed: str) -> bool:
+    """Return whether the current settings route the encode through AMD VCE."""
+    normalized_speed = str(encode_speed or "").strip().lower()
+    normalized_codec = str(codec or "").strip().lower()
+    if normalized_speed == "normal":
+        return normalized_codec.startswith("vce_") and is_vce_available()
+    if normalized_speed == "fast":
+        return normalized_codec.startswith("vce_") and is_vce_available()
+    return False
+
+
 def uses_nvenc_encoder(codec: str, encode_speed: str) -> bool:
     """Return whether the current settings route the encode through NVENC."""
     normalized_speed = str(encode_speed or "").strip().lower()
@@ -584,20 +728,42 @@ def _preset_requests_nvenc(preset_params: Optional[dict]) -> bool:
     return "nvenc" in base
 
 
+def _preset_requests_vce(preset_params: Optional[dict]) -> bool:
+    """Return whether the preset requests an AMD VCE encoder."""
+    if not isinstance(preset_params, dict):
+        return False
+    video_cfg = preset_params.get("video") if isinstance(preset_params.get("video"), dict) else {}
+    encoder = str((video_cfg or {}).get("encoder") or "").strip().lower()
+    if encoder.startswith("vce_"):
+        return True
+    base = str(preset_params.get("handbrake_preset") or "").strip().lower()
+    return "vce" in base
+
+
+def _preset_requests_hw_encoder(preset_params: Optional[dict]) -> bool:
+    """Return whether the preset requests any hardware encoder (NVENC or VCE)."""
+    return _preset_requests_nvenc(preset_params) or _preset_requests_vce(preset_params)
+
+
 def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[dict]:
     if not isinstance(preset_params, dict):
         return None
     fallback = copy.deepcopy(preset_params)
     base = str(fallback.get("handbrake_preset") or "").strip().lower()
-    if "nvenc" in base:
+    if "nvenc" in base or "vce" in base:
         fallback["handbrake_preset"] = ""
 
     video_cfg = fallback.get("video")
     if isinstance(video_cfg, dict):
         encoder = str(video_cfg.get("encoder") or "").strip().lower()
-        if encoder.startswith("nvenc_"):
-            video_cfg["encoder"] = "x265" if "265" in encoder else "x264"
-            # NVENC-specific knobs can break software encoders.
+        if encoder.startswith("nvenc_") or encoder.startswith("vce_"):
+            if "av1" in encoder:
+                video_cfg["encoder"] = "svt_av1"
+            elif "265" in encoder:
+                video_cfg["encoder"] = "x265"
+            else:
+                video_cfg["encoder"] = "x264"
+            # HW-specific knobs can break software encoders.
             video_cfg["encoder_preset"] = ""
             video_cfg["extra_options"] = ""
     return fallback
@@ -606,6 +772,17 @@ def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[d
 def _is_unknown_video_codec_nvenc_error(hb_error_detail: str) -> bool:
     detail = str(hb_error_detail or "").lower()
     return "unknown video codec" in detail and "nvenc" in detail
+
+
+def _is_unknown_video_codec_vce_error(hb_error_detail: str) -> bool:
+    """Return whether the HandBrake error was caused by an unknown VCE codec."""
+    detail = str(hb_error_detail or "").lower()
+    return "unknown video codec" in detail and "vce" in detail
+
+
+def _is_unknown_video_codec_hw_error(hb_error_detail: str) -> bool:
+    """Return whether the HandBrake error was caused by an unknown HW codec."""
+    return _is_unknown_video_codec_nvenc_error(hb_error_detail) or _is_unknown_video_codec_vce_error(hb_error_detail)
 
 
 def generate_unique_filename(base_name: str, extension: str, output_path: str) -> str:
@@ -1081,6 +1258,11 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                    allow_nvenc_retry: bool = True) -> str:
     thread_id = threading.get_ident()
 
+    # Resolve virtual codec "av1_auto" to the best available AV1 encoder
+    if str(codec or "").strip().lower() == "av1_auto":
+        codec = resolve_av1_encoder()
+        debug(f"av1_auto resolved to: {codec}")
+
     is_iso = title is not None
     is_resume = bool(resume_partial_file and resume_offset_seconds > 0)
     media_info_data: dict | None = None
@@ -1226,10 +1408,21 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
         hb_params += ["--title", str(title)]
 
     nvenc_requested = False
+    vce_requested = False
 
     if preset_params:
+        # Resolve av1_auto in preset encoder
+        video_cfg_pre = preset_params.get("video") if isinstance(preset_params.get("video"), dict) else {}
+        if str((video_cfg_pre or {}).get("encoder") or "").strip().lower() == "av1_auto":
+            resolved = resolve_av1_encoder()
+            debug(f"Preset av1_auto resolved to: {resolved}")
+            preset_params["video"]["encoder"] = resolved
+
         if _preset_requests_nvenc(preset_params) and not is_nvenc_available():
             warning("Preset requests NVENC but NVENC is not available. Falling back to software encoder.")
+            preset_params = _build_software_fallback_preset(preset_params)
+        elif _preset_requests_vce(preset_params) and not is_vce_available():
+            warning("Preset requests AMD VCE but VCE is not available. Falling back to software encoder.")
             preset_params = _build_software_fallback_preset(preset_params)
         from clutch.presets import build_handbrake_args
         hb_params += build_handbrake_args(preset_params, source_resolution=resolution)
@@ -1237,24 +1430,40 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
         video_cfg = preset_params.get("video") if isinstance(preset_params, dict) else {}
         encoder_name = str((video_cfg or {}).get("encoder") or "").lower()
         nvenc_requested = _preset_requests_nvenc(preset_params)
+        vce_requested = _preset_requests_vce(preset_params)
         if gpu_device is not None and encoder_name.startswith("nvenc_"):
             hb_params.extend(["--encopts", f"gpu={int(gpu_device)}"])
     else:
         hb_params += audio_params
+        normalized_codec = str(codec or "").strip().lower()
         if encode_speed == "slow":
             hb_params.extend(["--preset", "H.265 MKV 2160p60 4K"])
         elif encode_speed == "normal":
             if uses_nvenc_encoder(codec, encode_speed):
                 hb_params.extend(["--preset", "H.265 NVENC 2160p 4K"])
+            elif normalized_codec.startswith("vce_") and uses_vce_encoder(codec, encode_speed):
+                hb_params.extend([
+                    "-e", codec,
+                    "-w", resolution.split("x")[0],
+                    "-l", resolution.split("x")[1],
+                    "-q", "22",
+                ])
             else:
-                warning("NVENC is not available in this runtime. Falling back to software H.265 preset.")
+                warning("Hardware encoder is not available in this runtime. Falling back to software H.265 preset.")
                 hb_params.extend(["--preset", "H.265 MKV 2160p60 4K"])
         elif encode_speed == "fast":
             selected_codec = codec
-            normalized_codec = str(codec or "").strip().lower()
             if normalized_codec.startswith("nvenc_") and not uses_nvenc_encoder(codec, encode_speed):
                 warning("NVENC is not available in this runtime. Falling back to software encoder for fast mode.")
                 selected_codec = "x265" if "265" in normalized_codec else "x264"
+            elif normalized_codec.startswith("vce_") and not uses_vce_encoder(codec, encode_speed):
+                warning("AMD VCE is not available in this runtime. Falling back to software encoder for fast mode.")
+                if "av1" in normalized_codec:
+                    selected_codec = "svt_av1"
+                elif "265" in normalized_codec:
+                    selected_codec = "x265"
+                else:
+                    selected_codec = "x264"
             hb_params.extend([
                 "-e", selected_codec,
                 "-w", resolution.split("x")[0],
@@ -1263,6 +1472,7 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 "--vb", "1000",
             ])
         nvenc_requested = uses_nvenc_encoder(codec, encode_speed)
+        vce_requested = uses_vce_encoder(codec, encode_speed)
         if gpu_device is not None and uses_nvenc_encoder(codec, encode_speed):
             hb_params.extend(["--encopts", f"gpu={int(gpu_device)}"])
 
@@ -1581,12 +1791,13 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
 
             should_retry_with_software = (
                 allow_nvenc_retry
-                and nvenc_requested
-                and _is_unknown_video_codec_nvenc_error(hb_error_detail)
+                and (nvenc_requested or vce_requested)
+                and _is_unknown_video_codec_hw_error(hb_error_detail)
             )
 
             if should_retry_with_software:
-                warning("NVENC failed with unsupported codec in this runtime. Retrying with software encoder.")
+                hw_name = "AMD VCE" if vce_requested else "NVENC"
+                warning(f"{hw_name} failed with unsupported codec in this runtime. Retrying with software encoder.")
                 _remove_temp_and_log(temp_filepath)
                 _update_conversion_state(
                     thread_id,
@@ -1606,7 +1817,13 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 if preset_params:
                     retry_preset_params = _build_software_fallback_preset(preset_params)
                 else:
-                    retry_codec = "x265" if "265" in str(codec or "").lower() else "x264"
+                    codec_lower = str(codec or "").lower()
+                    if "av1" in codec_lower:
+                        retry_codec = "svt_av1"
+                    elif "265" in codec_lower:
+                        retry_codec = "x265"
+                    else:
+                        retry_codec = "x264"
                     retry_speed = "fast" if str(encode_speed or "").lower() == "fast" else "slow"
 
                 return convert_video(

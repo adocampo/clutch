@@ -88,6 +88,8 @@
                     </li>
                     <li><a class="sidebar-link sidebar-sub-link" href="#settings/logs" data-page="settings/logs">
                             <span class="sidebar-label" data-i18n="nav.settings.logs">Logs</span></a></li>
+                    <li><a class="sidebar-link sidebar-sub-link" href="#settings/backup" data-page="settings/backup">
+                            <span class="sidebar-label" data-i18n="nav.settings.backup">Backup</span></a></li>
                     <li><a class="sidebar-link sidebar-sub-link" href="#settings/user" data-page="settings/user">
                             <span class="sidebar-label" data-i18n="nav.settings.user">User</span></a></li>
                 </ul>
@@ -106,6 +108,7 @@
                     <a href="#settings/notifications" data-page="settings/notifications"
                         data-i18n="nav.settings.notifications">Notifications</a>
                     <a href="#settings/logs" data-page="settings/logs" data-i18n="nav.settings.logs">Logs</a>
+                    <a href="#settings/backup" data-page="settings/backup" data-i18n="nav.settings.backup">Backup</a>
                     <a href="#settings/user" data-page="settings/user" data-i18n="nav.settings.user">User</a>
                 </div>
             </li>
@@ -401,11 +404,15 @@
                         <div class="field-row">
                             <label class="field-row-label" data-i18n="jobs.codec_label">Codec</label>
                             <div class="field-row-control">
-                                <select name="codec" data-i18n-title="jobs.codec_title" title="Encoder profile.">
-                                    <option value="nvenc_h265">nvenc_h265</option>
-                                    <option value="nvenc_h264">nvenc_h264</option>
-                                    <option value="av1">av1</option>
-                                    <option value="x265">x265</option>
+                                <select name="codec" data-i18n-title="jobs.codec_title" title="Encoder profile." data-codec-select>
+                                    <option value="nvenc_h265" data-hw="nvenc">H.265 (NVIDIA)</option>
+                                    <option value="nvenc_h264" data-hw="nvenc">H.264 (NVIDIA)</option>
+                                    <option value="vce_h265" data-hw="vce">H.265 (AMD)</option>
+                                    <option value="vce_h264" data-hw="vce">H.264 (AMD)</option>
+                                    <option value="av1_auto">AV1 (GPU)</option>
+                                    <option value="svt_av1">AV1 (CPU)</option>
+                                    <option value="x265">H.265 (CPU)</option>
+                                    <option value="x264">H.264 (CPU)</option>
                                 </select>
                             </div>
                         </div>
@@ -520,11 +527,15 @@
                         <div class="field-row" id="upload-codec-row">
                             <label class="field-row-label" data-i18n="jobs.codec_label">Codec</label>
                             <div class="field-row-control">
-                                <select id="upload-codec">
-                                    <option value="nvenc_h265">nvenc_h265</option>
-                                    <option value="nvenc_h264">nvenc_h264</option>
-                                    <option value="av1">av1</option>
-                                    <option value="x265">x265</option>
+                                <select id="upload-codec" data-codec-select>
+                                    <option value="nvenc_h265" data-hw="nvenc">H.265 (NVIDIA)</option>
+                                    <option value="nvenc_h264" data-hw="nvenc">H.264 (NVIDIA)</option>
+                                    <option value="vce_h265" data-hw="vce">H.265 (AMD)</option>
+                                    <option value="vce_h264" data-hw="vce">H.264 (AMD)</option>
+                                    <option value="av1_auto">AV1 (GPU)</option>
+                                    <option value="svt_av1">AV1 (CPU)</option>
+                                    <option value="x265">H.265 (CPU)</option>
+                                    <option value="x264">H.264 (CPU)</option>
                                 </select>
                             </div>
                         </div>
@@ -686,12 +697,16 @@
                             <label class="field-row-label" data-i18n="watchers.codec_label">Codec</label>
                             <div class="field-row-control">
                                 <select name="codec" data-i18n-title="watchers.codec_title"
-                                    title="Override the encoder for this watcher.">
+                                    title="Override the encoder for this watcher." data-codec-select>
                                     <option value="" data-i18n="watchers.codec_default">Use default</option>
-                                    <option value="nvenc_h265">nvenc_h265</option>
-                                    <option value="nvenc_h264">nvenc_h264</option>
-                                    <option value="av1">av1</option>
-                                    <option value="x265">x265</option>
+                                    <option value="nvenc_h265" data-hw="nvenc">H.265 (NVIDIA)</option>
+                                    <option value="nvenc_h264" data-hw="nvenc">H.264 (NVIDIA)</option>
+                                    <option value="vce_h265" data-hw="vce">H.265 (AMD)</option>
+                                    <option value="vce_h264" data-hw="vce">H.264 (AMD)</option>
+                                    <option value="av1_auto">AV1 (GPU)</option>
+                                    <option value="svt_av1">AV1 (CPU)</option>
+                                    <option value="x265">H.265 (CPU)</option>
+                                    <option value="x264">H.264 (CPU)</option>
                                 </select>
                             </div>
                         </div>
@@ -1163,11 +1178,15 @@
                             <label class="field-row-label" data-i18n="settings.media.codec_label">Default codec</label>
                             <div class="field-row-control">
                                 <select name="default_codec" data-i18n-title="settings.media.codec_title"
-                                    title="Default encoder for new jobs.">
-                                    <option value="nvenc_h265">nvenc_h265</option>
-                                    <option value="nvenc_h264">nvenc_h264</option>
-                                    <option value="av1">av1</option>
-                                    <option value="x265">x265</option>
+                                    title="Default encoder for new jobs." data-codec-select>
+                                    <option value="nvenc_h265" data-hw="nvenc">H.265 (NVIDIA)</option>
+                                    <option value="nvenc_h264" data-hw="nvenc">H.264 (NVIDIA)</option>
+                                    <option value="vce_h265" data-hw="vce">H.265 (AMD)</option>
+                                    <option value="vce_h264" data-hw="vce">H.264 (AMD)</option>
+                                    <option value="av1_auto">AV1 (GPU)</option>
+                                    <option value="svt_av1">AV1 (CPU)</option>
+                                    <option value="x265">H.265 (CPU)</option>
+                                    <option value="x264">H.264 (CPU)</option>
                                 </select>
                             </div>
                         </div>
@@ -1995,6 +2014,43 @@
                             settings</button>
                     </div>
                     <div class="status-line" id="log-settings-status"></div>
+                </fieldset>
+            </div>
+        </section>
+
+        <!-- Settings > Backup (Export / Import) -->
+        <section class="page" id="page-settings-backup" data-page="settings/backup" hidden>
+            <div class="page-inner page-narrow">
+                <h2 data-i18n="settings.backup.title">Backup &amp; Restore</h2>
+
+                <fieldset class="options-section">
+                    <legend data-i18n="settings.backup.export_legend">Export Configuration</legend>
+                    <p class="small" data-i18n="settings.backup.export_desc">Download a complete backup of all settings,
+                        presets, users, tokens, SMTP configuration, notification channels, watchers, and defaults. Passwords
+                        and secrets are included in hashed form.</p>
+                    <div class="actions actions-centered">
+                        <button class="primary" type="button" id="backup-export-btn"
+                            data-i18n="settings.backup.export_btn">Export configuration</button>
+                    </div>
+                    <div class="status-line" id="backup-export-status"></div>
+                </fieldset>
+
+                <fieldset class="options-section">
+                    <legend data-i18n="settings.backup.import_legend">Import Configuration</legend>
+                    <p class="small" data-i18n="settings.backup.import_desc">Restore a previously exported configuration
+                        file. This will overwrite all current settings, presets, users, and defaults with the imported
+                        data.</p>
+                    <div class="field-row">
+                        <label class="field-row-label" data-i18n="settings.backup.file_label">Backup file</label>
+                        <div class="field-row-control">
+                            <input type="file" id="backup-import-file" accept=".json,application/json">
+                        </div>
+                    </div>
+                    <div class="actions actions-centered">
+                        <button class="primary" type="button" id="backup-import-btn" disabled
+                            data-i18n="settings.backup.import_btn">Import configuration</button>
+                    </div>
+                    <div class="status-line" id="backup-import-status"></div>
                 </fieldset>
             </div>
         </section>
