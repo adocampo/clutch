@@ -76,6 +76,7 @@ _last_sigint_time: float = 0.0
 _DOUBLE_PRESS_INTERVAL = 1.5  # seconds
 _nvenc_available_cache: Optional[bool] = None
 _vce_available_cache: Optional[bool] = None
+_vaapi_fallback_cache: Optional[bool] = None
 
 
 def get_last_failure_reason() -> str:
@@ -648,7 +649,10 @@ def is_vce_available() -> bool:
     _vce_available_cache = _vce_smoke_test()
     if not _vce_available_cache:
         from clutch.output import warning as _warn
-        _warn("AMD VCE encoder detected but smoke-test failed (likely a driver/HandBrake bug). VCE disabled; using software encoders.")
+        vaapi_hint = ""
+        if is_vaapi_fallback_available():
+            vaapi_hint = " VA-API (ffmpeg) is available as fallback — use vaapi_h265/vaapi_av1 codecs."
+        _warn(f"AMD VCE encoder detected but smoke-test failed (likely a driver/HandBrake bug). VCE disabled; using software encoders.{vaapi_hint}")
     return _vce_available_cache
 
 
@@ -752,11 +756,16 @@ def _is_av1_vce_available() -> bool:
 def resolve_av1_encoder() -> str:
     """Resolve the best available AV1 encoder for this system.
 
-    Priority: AMD VCE AV1 > NVIDIA AV1 NVENC > Intel QSV AV1 > SVT-AV1 (CPU).
-    Returns the HandBrake encoder identifier string.
+    Priority: AMD VCE AV1 > AMD VA-API AV1 > NVIDIA AV1 NVENC > Intel QSV AV1 > SVT-AV1 (CPU).
+    Returns the HandBrake encoder identifier string (or vaapi_av1 for VA-API).
     """
     if _is_av1_vce_available():
         return "vce_av1"
+    # VA-API AV1 check (ffmpeg av1_vaapi — works on RDNA 3+ even when HandBrake VCE fails)
+    if is_vaapi_fallback_available():
+        from clutch.ffmpeg_converter import get_vaapi_encoders
+        if get_vaapi_encoders().get("av1_vaapi"):
+            return "vaapi_av1"
     if _is_av1_nvenc_available():
         return "av1_nvenc"
     # QSV AV1 check (Intel Arc)
@@ -771,6 +780,36 @@ def resolve_av1_encoder() -> str:
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
     return "svt_av1"
+
+
+def is_vaapi_fallback_available() -> bool:
+    """Return whether VA-API ffmpeg can be used as fallback when VCE is unavailable.
+
+    This is cached for the process lifetime. Useful on AMD GPUs where HandBrake
+    VCE crashes but ffmpeg VA-API works perfectly.
+    """
+    global _vaapi_fallback_cache
+    if _vaapi_fallback_cache is not None:
+        return _vaapi_fallback_cache
+    from clutch.ffmpeg_converter import is_vaapi_available
+    _vaapi_fallback_cache = is_vaapi_available()
+    return _vaapi_fallback_cache
+
+
+def _preset_requests_vaapi(preset_params: Optional[dict]) -> bool:
+    """Return whether the preset requests a VA-API encoder."""
+    if not isinstance(preset_params, dict):
+        return False
+    video_cfg = preset_params.get("video") if isinstance(preset_params.get("video"), dict) else {}
+    encoder = str((video_cfg or {}).get("encoder") or "").strip().lower()
+    return encoder.startswith("vaapi_")
+
+
+def uses_vaapi_encoder(codec: str, encode_speed: str) -> bool:
+    """Return whether the current settings route the encode through VA-API."""
+    from clutch.ffmpeg_converter import is_vaapi_available, is_vaapi_codec
+    normalized_codec = str(codec or "").strip().lower()
+    return is_vaapi_codec(normalized_codec) and is_vaapi_available()
 
 
 def uses_vce_encoder(codec: str, encode_speed: str) -> bool:
@@ -819,8 +858,8 @@ def _preset_requests_vce(preset_params: Optional[dict]) -> bool:
 
 
 def _preset_requests_hw_encoder(preset_params: Optional[dict]) -> bool:
-    """Return whether the preset requests any hardware encoder (NVENC or VCE)."""
-    return _preset_requests_nvenc(preset_params) or _preset_requests_vce(preset_params)
+    """Return whether the preset requests any hardware encoder (NVENC, VCE, or VA-API)."""
+    return _preset_requests_nvenc(preset_params) or _preset_requests_vce(preset_params) or _preset_requests_vaapi(preset_params)
 
 
 def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[dict]:
@@ -834,10 +873,10 @@ def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[d
     video_cfg = fallback.get("video")
     if isinstance(video_cfg, dict):
         encoder = str(video_cfg.get("encoder") or "").strip().lower()
-        if encoder.startswith("nvenc_") or encoder.startswith("vce_"):
+        if encoder.startswith("nvenc_") or encoder.startswith("vce_") or encoder.startswith("vaapi_"):
             if "av1" in encoder:
                 video_cfg["encoder"] = "svt_av1"
-            elif "265" in encoder:
+            elif "265" in encoder or "hevc" in encoder:
                 video_cfg["encoder"] = "x265"
             else:
                 video_cfg["encoder"] = "x264"
@@ -1352,6 +1391,43 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
         codec = resolve_av1_encoder()
         debug(f"av1_auto resolved to: {codec}")
 
+    # Delegate VA-API codecs to the ffmpeg backend
+    from clutch.ffmpeg_converter import is_vaapi_codec, is_vaapi_available
+    codec_lower = str(codec or "").strip().lower()
+    vaapi_via_preset = _preset_requests_vaapi(preset_params)
+    if is_vaapi_codec(codec_lower) or vaapi_via_preset:
+        if not is_vaapi_available():
+            warning("VA-API encoder requested but VA-API is not available. Falling back to software encoder.")
+            if vaapi_via_preset:
+                preset_params = _build_software_fallback_preset(preset_params)
+            elif "av1" in codec_lower:
+                codec = "svt_av1"
+            elif "265" in codec_lower or "hevc" in codec_lower:
+                codec = "x265"
+            else:
+                codec = "x264"
+            # Fall through to HandBrake path below
+        else:
+            from clutch.ffmpeg_converter import convert_video_ffmpeg
+            return convert_video_ffmpeg(
+                input_file,
+                output_dir,
+                codec,
+                encode_speed=encode_speed,
+                audio_passthrough=audio_passthrough,
+                verbose=verbose,
+                resolution_override=resolution_override,
+                show_progress=show_progress,
+                progress_callback=progress_callback,
+                emit_logs=emit_logs,
+                progress_log_path=progress_log_path,
+                detach_when=detach_when,
+                runtime_callback=runtime_callback,
+                output_base_dir=output_base_dir,
+                preset_params=preset_params,
+                start_at_seconds=resume_offset_seconds,
+            )
+
     is_iso = title is not None
     is_resume = bool(resume_partial_file and resume_offset_seconds > 0)
     media_info_data: dict | None = None
@@ -1533,8 +1609,37 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             warning("Preset requests NVENC but NVENC is not available. Falling back to software encoder.")
             preset_params = _build_software_fallback_preset(preset_params)
         elif _preset_requests_vce(preset_params) and not is_vce_available():
-            warning("Preset requests AMD VCE but VCE is not available. Falling back to software encoder.")
-            preset_params = _build_software_fallback_preset(preset_params)
+            # Try VA-API fallback before falling back to software
+            if is_vaapi_fallback_available():
+                from clutch.ffmpeg_converter import convert_video_ffmpeg
+                # Map VCE encoder to equivalent VA-API encoder
+                vce_enc = str((preset_params.get("video") or {}).get("encoder") or "").lower()
+                if "av1" in vce_enc:
+                    vaapi_codec = "vaapi_av1"
+                elif "264" in vce_enc:
+                    vaapi_codec = "vaapi_h264"
+                else:
+                    vaapi_codec = "vaapi_h265"
+                warning(f"Preset requests AMD VCE but VCE is not available. Using VA-API ({vaapi_codec}) via ffmpeg.")
+                return convert_video_ffmpeg(
+                    input_file, output_dir, vaapi_codec,
+                    encode_speed=encode_speed,
+                    audio_passthrough=audio_passthrough,
+                    verbose=verbose,
+                    resolution_override=resolution_override,
+                    show_progress=show_progress,
+                    progress_callback=progress_callback,
+                    emit_logs=emit_logs,
+                    progress_log_path=progress_log_path,
+                    detach_when=detach_when,
+                    runtime_callback=runtime_callback,
+                    output_base_dir=output_base_dir,
+                    preset_params=preset_params,
+                    start_at_seconds=resume_offset_seconds,
+                )
+            else:
+                warning("Preset requests AMD VCE but VCE is not available. Falling back to software encoder.")
+                preset_params = _build_software_fallback_preset(preset_params)
         from clutch.presets import build_handbrake_args
         hb_params += build_handbrake_args(preset_params, source_resolution=resolution)
         # GPU pinning when the preset's video encoder is NVENC.
@@ -1559,6 +1664,25 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     "-l", resolution.split("x")[1],
                     "-q", "22",
                 ])
+            elif normalized_codec.startswith("vce_") and not uses_vce_encoder(codec, encode_speed) and is_vaapi_fallback_available():
+                # VCE failed but VA-API works — delegate to ffmpeg
+                from clutch.ffmpeg_converter import convert_video_ffmpeg
+                if "av1" in normalized_codec:
+                    vaapi_codec = "vaapi_av1"
+                elif "264" in normalized_codec:
+                    vaapi_codec = "vaapi_h264"
+                else:
+                    vaapi_codec = "vaapi_h265"
+                warning(f"AMD VCE is not available. Using VA-API ({vaapi_codec}) via ffmpeg.")
+                return convert_video_ffmpeg(
+                    input_file, output_dir, vaapi_codec,
+                    encode_speed=encode_speed, audio_passthrough=audio_passthrough,
+                    verbose=verbose, resolution_override=resolution_override,
+                    show_progress=show_progress, progress_callback=progress_callback,
+                    emit_logs=emit_logs, progress_log_path=progress_log_path,
+                    detach_when=detach_when, runtime_callback=runtime_callback,
+                    output_base_dir=output_base_dir, preset_params=preset_params,
+                )
             else:
                 warning("Hardware encoder is not available in this runtime. Falling back to software H.265 preset.")
                 hb_params.extend(["--preset", "H.265 MKV 2160p60 4K"])
@@ -1568,6 +1692,24 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 warning("NVENC is not available in this runtime. Falling back to software encoder for fast mode.")
                 selected_codec = "x265" if "265" in normalized_codec else "x264"
             elif normalized_codec.startswith("vce_") and not uses_vce_encoder(codec, encode_speed):
+                if is_vaapi_fallback_available():
+                    from clutch.ffmpeg_converter import convert_video_ffmpeg
+                    if "av1" in normalized_codec:
+                        vaapi_codec = "vaapi_av1"
+                    elif "264" in normalized_codec:
+                        vaapi_codec = "vaapi_h264"
+                    else:
+                        vaapi_codec = "vaapi_h265"
+                    warning(f"AMD VCE is not available. Using VA-API ({vaapi_codec}) via ffmpeg for fast mode.")
+                    return convert_video_ffmpeg(
+                        input_file, output_dir, vaapi_codec,
+                        encode_speed=encode_speed, audio_passthrough=audio_passthrough,
+                        verbose=verbose, resolution_override=resolution_override,
+                        show_progress=show_progress, progress_callback=progress_callback,
+                        emit_logs=emit_logs, progress_log_path=progress_log_path,
+                        detach_when=detach_when, runtime_callback=runtime_callback,
+                        output_base_dir=output_base_dir, preset_params=preset_params,
+                    )
                 warning("AMD VCE is not available in this runtime. Falling back to software encoder for fast mode.")
                 if "av1" in normalized_codec:
                     selected_codec = "svt_av1"

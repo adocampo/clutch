@@ -97,6 +97,7 @@ ALLOWED_VALUES: Dict[str, set] = {
         "x264", "x265", "x265_10bit", "nvenc_h264", "nvenc_h265", "nvenc_h265_10bit",
         "av1", "av1_auto", "av1_nvenc", "av1_qsv", "svt_av1", "svt_av1_10bit",
         "vce_h264", "vce_h265", "vce_av1",
+        "vaapi_h265", "vaapi_hevc", "vaapi_h264", "vaapi_av1",
         "vp9", "vp9_10bit", "qsv_h264", "qsv_h265",
         "vt_h264", "vt_h265", "mpeg2", "mpeg4", "theora",
     },

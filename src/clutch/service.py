@@ -34,6 +34,7 @@ from clutch.converter import (
     get_visible_nvidia_gpus,
     is_conversion_process_alive,
     is_nvenc_available,
+    is_vaapi_fallback_available,
     is_vce_available,
     parse_gpu_devices,
     request_conversion_pause_by_pid,
@@ -1850,6 +1851,7 @@ class ConversionService:
             "hw_encoders": {
                 "nvenc": is_nvenc_available(),
                 "vce": is_vce_available(),
+                "vaapi": is_vaapi_fallback_available(),
                 "av1_gpu": resolve_av1_encoder() != "svt_av1",
             },
             "update_info": self.get_update_info(force_check=force_update_check),

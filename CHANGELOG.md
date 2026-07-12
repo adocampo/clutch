@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.0] - 2026-07-12
+
+### Added in 2.4.0
+
+- **FFmpeg VA-API encoding backend**: full alternative encoding path using ffmpeg with VA-API hardware acceleration. Activates automatically when HandBrake VCE is unavailable but VA-API works (e.g. AMD RDNA 3.5 GPUs where HandBrake segfaults). New codecs: `vaapi_h265`, `vaapi_h264`, `vaapi_av1`.
+- **Automatic VCE → VA-API fallback**: when HandBrake VCE smoke-test fails on an AMD GPU, Clutch now transparently falls back to ffmpeg VA-API instead of software encoders — preserving hardware-accelerated speeds (~470 fps HEVC 1080p on Radeon 8060S).
+- **VA-API in `av1_auto` resolution**: the "AV1 (GPU)" virtual codec now checks VA-API AV1 availability in its priority chain (VCE AV1 > VA-API AV1 > NVENC AV1 > QSV AV1 > SVT-AV1 CPU).
+- **Dashboard VA-API options**: three new codec entries in all dashboard dropdowns — H.265 (VA-API), H.264 (VA-API), AV1 (VA-API) — hidden automatically when VA-API is not available on the system.
+- **VA-API hardware detection**: smoke-test based detection (render node check + ffmpeg encoder probe + real encode test) with result cached for process lifetime.
+
 ## [2.3.2] - 2026-07-11
 
 ### Fixed in 2.3.2
