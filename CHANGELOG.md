@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.3] - 2026-07-13
+
+### Fixed in 2.4.3
+
+- **VA-API now uses hardware decode**: added `-hwaccel vaapi -hwaccel_output_format vaapi` so both decode and encode run on GPU. Previously only encode used the GPU while decode burned CPU cores (~37% load on 32-core machine). Now decode+encode are fully GPU-accelerated.
+- **Progress bar works for ffmpeg conversions**: ffmpeg writes progress with `\r` (carriage return) not `\n`. Fixed the stderr reader to split on both `\r` and `\n`, so the dashboard/CLI progress bar updates in real time.
+- **Video filter chain fixed for hwaccel pipeline**: replaced `format=p010,hwupload` (CPU→GPU upload) with `scale_vaapi=format=p010` (stays on GPU throughout).
+
 ## [2.4.2] - 2026-07-13
 
 ### Fixed in 2.4.2

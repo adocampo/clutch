@@ -262,7 +262,11 @@ def build_ffmpeg_command(
     cmd: List[str] = [
         shutil.which("ffmpeg") or "ffmpeg",
         "-y",  # overwrite output
+        "-nostdin",  # disable interactive commands
         "-vaapi_device", render_node,
+        # Hardware-accelerated decode: decode on GPU, output vaapi surfaces
+        "-hwaccel", "vaapi",
+        "-hwaccel_output_format", "vaapi",
     ]
 
     # Seek before input for efficiency
@@ -274,17 +278,20 @@ def build_ffmpeg_command(
     # Explicit stream mapping: video first, then audio (added in _build_audio_args)
     cmd.extend(["-map", "0:v"])
 
-    # Video filter chain
+    # Video filter chain — with hwaccel decode, frames arrive as vaapi surfaces
+    # so we only need scale_vaapi (no format+hwupload needed for decode→encode on GPU)
     vf_parts = []
 
     # Scale filter (if resolution limit is set)
+    # With hwaccel vaapi decode, frames arrive as vaapi surfaces — no hwupload needed.
+    # Only scale_vaapi is needed for resizing; for passthrough, no video filter at all.
     if max_width > 0 or max_height > 0:
         w = str(max_width) if max_width > 0 else "-1"
         h = str(max_height) if max_height > 0 else "-1"
-        # Use scale_vaapi for hardware-accelerated scaling
-        vf_parts.append(f"format={pix_fmt},hwupload,scale_vaapi=w={w}:h={h}")
+        vf_parts.append(f"scale_vaapi=w={w}:h={h}:format={pix_fmt}")
     else:
-        vf_parts.append(f"format={pix_fmt},hwupload")
+        # No scaling needed — just ensure the right pixel format for the encoder
+        vf_parts.append(f"scale_vaapi=format={pix_fmt}")
 
     cmd.extend(["-vf", ",".join(vf_parts)])
 
@@ -631,13 +638,43 @@ def convert_video_ffmpeg(
             info(f"Converting (ffmpeg VA-API): {os.path.basename(input_file)}")
 
         # Read stderr for progress (ffmpeg writes progress to stderr)
+        # Note: ffmpeg uses \r (carriage return) for progress lines, not \n.
+        # We must read raw bytes and split on both \r and \n.
         conversion_succeeded = False
         error_lines: List[str] = []
 
+        def _iter_ffmpeg_lines(stream):
+            """Yield lines from ffmpeg stderr, splitting on both \\r and \\n."""
+            buf = b""
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    if buf:
+                        yield buf.decode("utf-8", errors="replace")
+                    break
+                buf += chunk
+                while b"\r" in buf or b"\n" in buf:
+                    # Find earliest separator
+                    idx_r = buf.find(b"\r")
+                    idx_n = buf.find(b"\n")
+                    if idx_r == -1:
+                        idx = idx_n
+                    elif idx_n == -1:
+                        idx = idx_r
+                    else:
+                        idx = min(idx_r, idx_n)
+                    line = buf[:idx].decode("utf-8", errors="replace")
+                    # Skip \r\n as single separator
+                    if idx < len(buf) - 1 and buf[idx:idx+2] == b"\r\n":
+                        buf = buf[idx+2:]
+                    else:
+                        buf = buf[idx+1:]
+                    if line:
+                        yield line
+
         if verbose:
             # In verbose mode, print everything
-            for raw_line in process.stderr:
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
+            for line in _iter_ffmpeg_lines(process.stderr):
                 if line:
                     print(line)
                     pct = parse_ffmpeg_progress(line, duration)
@@ -662,7 +699,7 @@ def convert_video_ffmpeg(
                 )
 
             try:
-                for raw_line in process.stderr:
+                for line in _iter_ffmpeg_lines(process.stderr):
                     if _is_conversion_interrupted(thread_id):
                         break
 
@@ -671,7 +708,6 @@ def convert_video_ffmpeg(
                         request_current_conversion_pause(thread_id)
                         raise ConversionDetached("Conversion detached from the service worker.")
 
-                    line = raw_line.decode("utf-8", errors="replace").rstrip()
                     if not line:
                         continue
 
