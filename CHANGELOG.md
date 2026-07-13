@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.1] - 2026-07-13
+
+### Fixed in 2.4.1
+
+- **ffmpeg libopus crash with 5.1(side) audio**: ffmpeg's libopus encoder rejected the `5.1(side)` channel layout (common in many movie files). Fixed by enabling Vorbis channel mapping (`-mapping_family 1`) which supports all multichannel layouts.
+- **AMD GPU name showing only PCI bus ID**: the dashboard GPU section displayed the raw lspci line (e.g. `c6:00.0 Display controller: ...`) instead of a human-readable name. Now parses the model correctly — e.g. `AMD Radeon 8060S Graphics (Strix Halo)`.
+
 ## [2.4.0] - 2026-07-12
 
 ### Added in 2.4.0

@@ -374,6 +374,11 @@ def _build_audio_args(
         # Encode mode
         cmd.extend(["-c:a", ffmpeg_audio_encoder])
 
+        # libopus needs mapping_family=1 for multichannel layouts like 5.1(side)
+        # that aren't supported by the default mapping_family (-1 auto).
+        if ffmpeg_audio_encoder == "libopus":
+            cmd.extend(["-mapping_family", "1"])
+
         if not bitrate:
             # Auto bitrate based on source channels
             audio_info = get_audio_info(input_file, data=source_info)

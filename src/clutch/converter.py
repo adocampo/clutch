@@ -564,6 +564,57 @@ def is_nvenc_available() -> bool:
     return _nvenc_available_cache
 
 
+def _parse_amd_gpu_name(lspci_line: str) -> str:
+    """Extract a human-readable GPU name from a lspci -nn output line.
+
+    Input example:
+        c6:00.0 Display controller [0380]: Advanced Micro Devices, Inc. [AMD/ATI] Strix Halo [Radeon ... 8060S ...] [1002:1586] (rev c1)
+
+    Returns:
+        AMD Radeon 8060S Graphics (Strix Halo)
+    """
+    # Strip trailing "(rev XX)" and PCI vendor:device IDs like [1002:1586]
+    cleaned = re.sub(r'\s*\(rev\s+\w+\)\s*$', '', lspci_line)
+    cleaned = re.sub(r'\s*\[\w{4}:\w{4}\]\s*$', '', cleaned)
+
+    # Try to extract the portion after [AMD/ATI]
+    m = re.search(r'\[AMD/ATI\]\s*(.+)', cleaned)
+    if not m:
+        # Fallback: strip the bus ID prefix (e.g. "c6:00.0 ...")
+        stripped = re.sub(r'^[\da-f]+:[\da-f]+\.[\da-f]+\s+', '', cleaned, flags=re.IGNORECASE)
+        return stripped or lspci_line
+
+    remainder = m.group(1).strip()
+
+    # Extract codename and bracketed product name
+    bracket_match = re.search(r'^(.*?)\s*\[(.+)\]\s*$', remainder)
+    if bracket_match:
+        codename = bracket_match.group(1).strip()
+        product = bracket_match.group(2).strip()
+        # Pick the most specific product name (e.g. "Radeon 8060S Graphics")
+        # from slash-separated alternatives like "Radeon Graphics / Radeon 8050S / Radeon 8060S"
+        parts = [p.strip() for p in product.split("/")]
+        # Prefer the last part that has both a brand prefix and a model number
+        best = parts[0]
+        for part in reversed(parts):
+            if re.search(r'\d{4}', part) and re.search(r'(?i)radeon|rx\s', part):
+                best = part
+                break
+        # If none had a brand+number combo, pick the first with any model number
+        if not re.search(r'\d{4}', best):
+            for part in parts:
+                if re.search(r'\d{4}', part):
+                    best = part
+                    break
+        label = f"AMD {best}" if not best.lower().startswith("amd") else best
+        if codename:
+            label += f" ({codename})"
+        return label
+    else:
+        # No brackets — just use the remainder as-is
+        return f"AMD {remainder}" if not remainder.lower().startswith("amd") else remainder
+
+
 def get_visible_amd_gpus() -> list[dict[str, object]]:
     """Return visible AMD GPUs detected through lspci or sysfs.
 
@@ -586,7 +637,7 @@ def get_visible_amd_gpus() -> list[dict[str, object]]:
                 continue
             # Match AMD/ATI vendor names but not substrings like "Corporation"
             if re.search(r'\bamd\b', lower) or re.search(r'\bati\b', lower):
-                name = line.strip()
+                name = _parse_amd_gpu_name(line.strip())
                 if name not in seen:
                     seen.add(name)
                     devices.append({"index": len(devices), "name": name, "memory": ""})
