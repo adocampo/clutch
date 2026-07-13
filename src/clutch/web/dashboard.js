@@ -2190,6 +2190,7 @@
         var hasNvenc = Boolean(hwEncoders.nvenc);
         var hasVce = Boolean(hwEncoders.vce);
         var hasVaapi = Boolean(hwEncoders.vaapi);
+        var hasVt = Boolean(hwEncoders.vt);
         var hasAv1Gpu = Boolean(hwEncoders.av1_gpu);
         document.querySelectorAll('[data-codec-select]').forEach(function (sel) {
             var currentValue = sel.value;
@@ -2198,7 +2199,7 @@
                 var hw = opt.getAttribute('data-hw');
                 // Hide HW-specific H.264/H.265 options when that GPU brand is absent
                 if (hw) {
-                    var hide = (hw === 'nvenc' && !hasNvenc) || (hw === 'vce' && !hasVce) || (hw === 'vaapi' && !hasVaapi);
+                    var hide = (hw === 'nvenc' && !hasNvenc) || (hw === 'vce' && !hasVce) || (hw === 'vaapi' && !hasVaapi) || (hw === 'vt' && !hasVt);
                     opt.hidden = hide;
                     opt.disabled = hide;
                     if (hide && opt.value === currentValue) currentHidden = true;
@@ -5625,6 +5626,8 @@
         { name: 'H.265 (VA-API)', description: 'AMD/Intel VA-API H.265 encoder via ffmpeg — works when HandBrake VCE fails.', encoder: 'vaapi_h265', speeds: 'fast / normal / slow', hw: 'vaapi' },
         { name: 'H.264 (VA-API)', description: 'AMD/Intel VA-API H.264 encoder via ffmpeg — broad compatibility.', encoder: 'vaapi_h264', speeds: 'fast / normal / slow', hw: 'vaapi' },
         { name: 'AV1 (VA-API)', description: 'AMD/Intel VA-API AV1 encoder via ffmpeg — best compression with hardware speed.', encoder: 'vaapi_av1', speeds: 'fast / normal / slow', hw: 'vaapi' },
+        { name: 'H.265 (Apple)', description: 'Apple Silicon VideoToolbox H.265 encoder — fast hardware encoding on M-series chips.', encoder: 'vt_h265', speeds: 'fast / normal / slow', hw: 'vt' },
+        { name: 'H.264 (Apple)', description: 'Apple Silicon VideoToolbox H.264 encoder — broad device compatibility.', encoder: 'vt_h264', speeds: 'fast / normal / slow', hw: 'vt' },
         { name: 'AV1 (GPU)', description: 'AV1 hardware encoder — auto-detects AMD/NVIDIA/Intel GPU. Falls back to CPU if no GPU AV1 support.', encoder: 'av1_auto', speeds: 'fast / normal / slow' },
         { name: 'AV1 (CPU)', description: 'SVT-AV1 software encoder — best compression, slower.', encoder: 'svt_av1', speeds: 'fast / normal / slow' },
         { name: 'H.265 (CPU)', description: 'x265 software encoder — great quality, no GPU required.', encoder: 'x265', speeds: 'fast / normal / slow' },

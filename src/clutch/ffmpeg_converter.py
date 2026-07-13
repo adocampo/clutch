@@ -166,6 +166,136 @@ def resolve_vaapi_encoder(codec: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# VideoToolbox (Apple Silicon) detection and mapping
+# ---------------------------------------------------------------------------
+
+_vt_available_cache: Optional[bool] = None
+_vt_encoders_cache: Optional[Dict[str, bool]] = None
+
+# Maps clutch codec names to ffmpeg VideoToolbox encoder names
+VT_ENCODER_MAP: Dict[str, str] = {
+    "vt_h265": "hevc_videotoolbox",
+    "vt_hevc": "hevc_videotoolbox",
+    "vt_h264": "h264_videotoolbox",
+}
+
+
+def _is_macos() -> bool:
+    """Return whether we're running on macOS."""
+    import platform
+    return platform.system() == "Darwin"
+
+
+def _is_apple_silicon() -> bool:
+    """Return whether we're running on Apple Silicon (arm64 macOS)."""
+    import platform
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+
+def _probe_vt_encoders() -> Dict[str, bool]:
+    """Probe which VideoToolbox encoders ffmpeg exposes."""
+    if not _is_macos():
+        return {}
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return {}
+
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {}
+
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    encoders: Dict[str, bool] = {}
+    for name in ("hevc_videotoolbox", "h264_videotoolbox"):
+        encoders[name] = bool(re.search(rf'\b{name}\b', output))
+    return encoders
+
+
+def _vt_smoke_test() -> bool:
+    """Run a minimal VideoToolbox encode to verify the encoder works."""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return False
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            [
+                ffmpeg_path, "-y", "-nostdin",
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=24",
+                "-c:v", "hevc_videotoolbox",
+                "-frames:v", "5",
+                tmp_path,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        ok = result.returncode == 0 and os.path.getsize(tmp_path) > 0
+        debug(f"VideoToolbox smoke test: exit_code={result.returncode}, ok={ok}")
+        return ok
+    except Exception as exc:
+        debug(f"VideoToolbox smoke test exception: {exc}")
+        return False
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def is_vt_available() -> bool:
+    """Return whether VideoToolbox encoding is functional on this system.
+
+    Checks: macOS platform, ffmpeg has videotoolbox encoders, smoke-test passes.
+    Result is cached for the process lifetime.
+    """
+    global _vt_available_cache
+    if _vt_available_cache is not None:
+        return _vt_available_cache
+
+    if not _is_macos():
+        _vt_available_cache = False
+        return False
+
+    encoders = get_vt_encoders()
+    if not any(encoders.values()):
+        debug("VideoToolbox: ffmpeg has no videotoolbox encoders")
+        _vt_available_cache = False
+        return False
+
+    _vt_available_cache = _vt_smoke_test()
+    if not _vt_available_cache:
+        warning("VideoToolbox encoders detected but smoke-test failed.")
+    else:
+        debug(f"VideoToolbox available: encoders={encoders}")
+    return _vt_available_cache
+
+
+def get_vt_encoders() -> Dict[str, bool]:
+    """Return which VideoToolbox encoders are available (cached)."""
+    global _vt_encoders_cache
+    if _vt_encoders_cache is None:
+        _vt_encoders_cache = _probe_vt_encoders()
+    return dict(_vt_encoders_cache)
+
+
+def is_vt_codec(codec: str) -> bool:
+    """Return whether a codec name refers to a VideoToolbox encoder."""
+    return str(codec or "").strip().lower() in VT_ENCODER_MAP
+
+
+def resolve_vt_encoder(codec: str) -> str:
+    """Map a clutch vt codec name to the ffmpeg encoder name."""
+    return VT_ENCODER_MAP.get(str(codec or "").strip().lower(), "hevc_videotoolbox")
+
+
+# ---------------------------------------------------------------------------
 # Source analysis helpers
 # ---------------------------------------------------------------------------
 
@@ -351,6 +481,125 @@ def build_ffmpeg_command(
     return cmd
 
 
+# VideoToolbox quality: uses -q:v (1-100, higher = better quality) or -b:v for bitrate.
+# Rough CRF equivalence: CRF 18 ≈ q 75, CRF 22 ≈ q 65, CRF 28 ≈ q 50
+DEFAULT_VT_QUALITY = 65
+
+
+def build_ffmpeg_vt_command(
+    input_file: str,
+    output_file: str,
+    *,
+    encoder: str = "hevc_videotoolbox",
+    quality: int = DEFAULT_VT_QUALITY,
+    max_width: int = 0,
+    max_height: int = 0,
+    audio_mode: str = "encode",
+    audio_encoder: str = "libopus",
+    audio_bitrate: str = "",
+    subtitle_mode: str = "all",
+    source_info: Optional[dict] = None,
+    start_at_seconds: float = 0.0,
+    preset_params: Optional[dict] = None,
+) -> List[str]:
+    """Build the complete ffmpeg command for VideoToolbox encoding (Apple Silicon).
+
+    Returns the full argument list including ``ffmpeg``.
+    """
+    is_10bit = False
+    if source_info:
+        is_10bit = source_info.get("bit_depth", 8) > 8 or source_info.get("is_hdr", False)
+
+    cmd: List[str] = [
+        shutil.which("ffmpeg") or "ffmpeg",
+        "-y",  # overwrite output
+        "-nostdin",  # disable interactive commands
+        # Hardware-accelerated decode via VideoToolbox
+        "-hwaccel", "videotoolbox",
+    ]
+
+    # Seek before input for efficiency
+    if start_at_seconds > 0:
+        cmd.extend(["-ss", f"{start_at_seconds:.3f}"])
+
+    cmd.extend(["-i", input_file])
+
+    # Explicit stream mapping
+    cmd.extend(["-map", "0:v"])
+
+    # Video scaling (if resolution limit is set)
+    if max_width > 0 or max_height > 0:
+        w = str(max_width) if max_width > 0 else "-1"
+        h = str(max_height) if max_height > 0 else "-1"
+        cmd.extend(["-vf", f"scale={w}:{h}"])
+
+    # Video encoder
+    cmd.extend(["-c:v", encoder])
+
+    # VideoToolbox quality: -q:v (1-100 scale, higher = better)
+    cmd.extend(["-q:v", str(quality)])
+
+    # Enable 10-bit output for HDR sources
+    if is_10bit and "hevc" in encoder:
+        cmd.extend(["-tag:v", "hvc1"])
+        # VT on Apple Silicon supports 10-bit HEVC natively via profile
+        cmd.extend(["-profile:v", "main10"])
+
+    # Allow hardware-accelerated encoding
+    cmd.extend(["-allow_sw", "1"])  # fallback to software if HW fails
+
+    # Apply preset params overrides if provided
+    if preset_params and isinstance(preset_params.get("video"), dict):
+        video_cfg = preset_params["video"]
+        quality_mode = str(video_cfg.get("quality_mode", "crf")).strip()
+        quality_value = video_cfg.get("quality_value")
+        try:
+            qv = int(float(quality_value)) if quality_value is not None else None
+        except (TypeError, ValueError):
+            qv = None
+        if qv is not None and qv > 0:
+            if quality_mode == "abr":
+                # Remove -q:v and use bitrate
+                idx = _find_arg_index(cmd, "-q:v")
+                if idx >= 0:
+                    cmd.pop(idx)  # remove -q:v
+                    cmd.pop(idx)  # remove value
+                cmd.extend(["-b:v", f"{qv}k"])
+            else:
+                # Map CRF-style value to VT quality scale
+                # CRF 18→75, CRF 22→65, CRF 28→50, CRF 30→45
+                vt_q = max(1, min(100, 100 - int(qv * 1.8)))
+                idx = _find_arg_index(cmd, "-q:v")
+                if idx >= 0 and idx + 1 < len(cmd):
+                    cmd[idx + 1] = str(vt_q)
+
+    # Audio handling
+    if preset_params and isinstance(preset_params.get("audio"), dict):
+        audio_cfg = preset_params["audio"]
+        audio_mode = str(audio_cfg.get("mode", "encode")).strip()
+        audio_encoder = str(audio_cfg.get("encoder", "opus")).strip()
+        audio_br = int(audio_cfg.get("bitrate", 0) or 0)
+        if audio_br > 0:
+            audio_bitrate = str(audio_br)
+
+    _build_audio_args(cmd, input_file, audio_mode, audio_encoder, audio_bitrate, source_info)
+
+    # Subtitle handling
+    if preset_params and isinstance(preset_params.get("subtitles"), dict):
+        subtitle_mode = str(preset_params["subtitles"].get("mode", "all")).strip()
+
+    _build_subtitle_args(cmd, subtitle_mode)
+
+    # Container: Matroska
+    cmd.extend(["-f", "matroska"])
+
+    # Chapter markers (copy by default)
+    cmd.extend(["-map_chapters", "0"])
+
+    cmd.append(output_file)
+    return cmd
+
+
 def _find_arg_index(args: List[str], flag: str) -> int:
     """Find the index of a flag in the argument list."""
     try:
@@ -489,7 +738,7 @@ def convert_video_ffmpeg(
     preset_params: Optional[dict] = None,
     start_at_seconds: float = 0.0,
 ) -> str:
-    """Convert a video file using ffmpeg with VA-API hardware acceleration.
+    """Convert a video file using ffmpeg with hardware acceleration (VA-API or VideoToolbox).
 
     Returns the path to the output file on success, or "" on failure.
     This function mirrors the interface of converter.convert_video() for the
@@ -532,15 +781,26 @@ def convert_video_ffmpeg(
 
     # Determine quality
     qp = DEFAULT_QP
+    vt_quality = DEFAULT_VT_QUALITY
     if preset_params and isinstance(preset_params.get("video"), dict):
         qv = preset_params["video"].get("quality_value")
         try:
             qp = int(float(qv)) if qv is not None and float(qv) > 0 else DEFAULT_QP
+            # Map CRF-style value to VT quality scale
+            vt_quality = max(1, min(100, 100 - int(qp * 1.8)))
         except (TypeError, ValueError):
             pass
 
+    # Detect backend: VideoToolbox or VA-API
+    _use_vt = is_vt_codec(codec)
+
     # Resolve ffmpeg encoder name
-    ffmpeg_encoder = resolve_vaapi_encoder(codec)
+    if _use_vt:
+        ffmpeg_encoder = resolve_vt_encoder(codec)
+        backend_label = "ffmpeg VideoToolbox"
+    else:
+        ffmpeg_encoder = resolve_vaapi_encoder(codec)
+        backend_label = "ffmpeg VA-API"
 
     # Audio settings
     audio_mode = "passthrough" if audio_passthrough else "encode"
@@ -576,23 +836,40 @@ def convert_video_ffmpeg(
     )
 
     # Build ffmpeg command
-    ffmpeg_cmd = build_ffmpeg_command(
-        input_file,
-        temp_filepath,
-        encoder=ffmpeg_encoder,
-        qp=qp,
-        max_width=max_width,
-        max_height=max_height,
-        audio_mode=audio_mode,
-        audio_encoder=audio_encoder,
-        audio_bitrate=audio_bitrate,
-        subtitle_mode=subtitle_mode,
-        source_info=source_info,
-        start_at_seconds=start_at_seconds,
-        preset_params=preset_params,
-    )
+    if _use_vt:
+        ffmpeg_cmd = build_ffmpeg_vt_command(
+            input_file,
+            temp_filepath,
+            encoder=ffmpeg_encoder,
+            quality=vt_quality,
+            max_width=max_width,
+            max_height=max_height,
+            audio_mode=audio_mode,
+            audio_encoder=audio_encoder,
+            audio_bitrate=audio_bitrate,
+            subtitle_mode=subtitle_mode,
+            source_info=source_info,
+            start_at_seconds=start_at_seconds,
+            preset_params=preset_params,
+        )
+    else:
+        ffmpeg_cmd = build_ffmpeg_command(
+            input_file,
+            temp_filepath,
+            encoder=ffmpeg_encoder,
+            qp=qp,
+            max_width=max_width,
+            max_height=max_height,
+            audio_mode=audio_mode,
+            audio_encoder=audio_encoder,
+            audio_bitrate=audio_bitrate,
+            subtitle_mode=subtitle_mode,
+            source_info=source_info,
+            start_at_seconds=start_at_seconds,
+            preset_params=preset_params,
+        )
 
-    debug(f"ffmpeg VA-API command: {' '.join(str(a) for a in ffmpeg_cmd)}")
+    debug(f"{backend_label} command: {' '.join(str(a) for a in ffmpeg_cmd)}")
 
     last_progress = 0.0
     duration = source_info.get("duration_seconds", 0.0)
@@ -606,7 +883,7 @@ def convert_video_ffmpeg(
         if progress_callback is not None:
             progress_callback(clamped, detail)
 
-    report_progress(0.0, "Starting ffmpeg VA-API conversion.")
+    report_progress(0.0, f"Starting {backend_label} conversion.")
 
     if _is_conversion_interrupted(thread_id):
         _clear_conversion_interrupt(thread_id)
@@ -631,11 +908,11 @@ def convert_video_ffmpeg(
                 "temp_file": temp_filepath,
                 "log_file": progress_log_path or f"{temp_filepath}.progress.log",
                 "final_output_file": final_output,
-                "backend": "ffmpeg_vaapi",
+                "backend": "ffmpeg_vt" if _use_vt else "ffmpeg_vaapi",
             })
 
         if emit_logs:
-            info(f"Converting (ffmpeg VA-API): {os.path.basename(input_file)}")
+            info(f"Converting ({backend_label}): {os.path.basename(input_file)}")
 
         # Read stderr for progress (ffmpeg writes progress to stderr)
         # Note: ffmpeg uses \r (carriage return) for progress lines, not \n.
@@ -780,7 +1057,7 @@ def convert_video_ffmpeg(
                 )
                 if emit_logs:
                     error(f"Conversion produced empty file: {os.path.basename(input_file)}")
-                _set_failure_reason("ffmpeg VA-API conversion produced empty file.")
+                _set_failure_reason(f"{backend_label} conversion produced empty file.")
                 return ""
 
             _update_conversion_state(
@@ -808,7 +1085,7 @@ def convert_video_ffmpeg(
             )
             error_detail = "\n".join(error_lines[-30:]) if error_lines else ""
             if emit_logs:
-                error(f"ffmpeg VA-API conversion failed: {os.path.basename(input_file)}")
+                error(f"{backend_label} conversion failed: {os.path.basename(input_file)}")
                 if error_detail:
                     error(f"ffmpeg output:\n{error_detail}")
             _set_failure_reason(f"ffmpeg exited with code {process.returncode}." + (f" Detail: {error_detail[:500]}" if error_detail else ""))

@@ -863,6 +863,28 @@ def uses_vaapi_encoder(codec: str, encode_speed: str) -> bool:
     return is_vaapi_codec(normalized_codec) and is_vaapi_available()
 
 
+def is_vt_available_cached() -> bool:
+    """Return whether VideoToolbox (Apple Silicon) encoding is available."""
+    from clutch.ffmpeg_converter import is_vt_available
+    return is_vt_available()
+
+
+def _preset_requests_vt(preset_params: Optional[dict]) -> bool:
+    """Return whether the preset requests a VideoToolbox encoder."""
+    if not isinstance(preset_params, dict):
+        return False
+    video_cfg = preset_params.get("video") if isinstance(preset_params.get("video"), dict) else {}
+    encoder = str((video_cfg or {}).get("encoder") or "").strip().lower()
+    return encoder.startswith("vt_")
+
+
+def uses_vt_encoder(codec: str, encode_speed: str) -> bool:
+    """Return whether the current settings route the encode through VideoToolbox."""
+    from clutch.ffmpeg_converter import is_vt_available, is_vt_codec
+    normalized_codec = str(codec or "").strip().lower()
+    return is_vt_codec(normalized_codec) and is_vt_available()
+
+
 def uses_vce_encoder(codec: str, encode_speed: str) -> bool:
     """Return whether the current settings route the encode through AMD VCE."""
     normalized_speed = str(encode_speed or "").strip().lower()
@@ -909,8 +931,8 @@ def _preset_requests_vce(preset_params: Optional[dict]) -> bool:
 
 
 def _preset_requests_hw_encoder(preset_params: Optional[dict]) -> bool:
-    """Return whether the preset requests any hardware encoder (NVENC, VCE, or VA-API)."""
-    return _preset_requests_nvenc(preset_params) or _preset_requests_vce(preset_params) or _preset_requests_vaapi(preset_params)
+    """Return whether the preset requests any hardware encoder (NVENC, VCE, VA-API, or VideoToolbox)."""
+    return _preset_requests_nvenc(preset_params) or _preset_requests_vce(preset_params) or _preset_requests_vaapi(preset_params) or _preset_requests_vt(preset_params)
 
 
 def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[dict]:
@@ -924,7 +946,7 @@ def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[d
     video_cfg = fallback.get("video")
     if isinstance(video_cfg, dict):
         encoder = str(video_cfg.get("encoder") or "").strip().lower()
-        if encoder.startswith("nvenc_") or encoder.startswith("vce_") or encoder.startswith("vaapi_"):
+        if encoder.startswith("nvenc_") or encoder.startswith("vce_") or encoder.startswith("vaapi_") or encoder.startswith("vt_"):
             if "av1" in encoder:
                 video_cfg["encoder"] = "svt_av1"
             elif "265" in encoder or "hevc" in encoder:
@@ -1453,6 +1475,41 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 preset_params = _build_software_fallback_preset(preset_params)
             elif "av1" in codec_lower:
                 codec = "svt_av1"
+            elif "265" in codec_lower or "hevc" in codec_lower:
+                codec = "x265"
+            else:
+                codec = "x264"
+            # Fall through to HandBrake path below
+        else:
+            from clutch.ffmpeg_converter import convert_video_ffmpeg
+            return convert_video_ffmpeg(
+                input_file,
+                output_dir,
+                codec,
+                encode_speed=encode_speed,
+                audio_passthrough=audio_passthrough,
+                verbose=verbose,
+                resolution_override=resolution_override,
+                show_progress=show_progress,
+                progress_callback=progress_callback,
+                emit_logs=emit_logs,
+                progress_log_path=progress_log_path,
+                detach_when=detach_when,
+                runtime_callback=runtime_callback,
+                output_base_dir=output_base_dir,
+                preset_params=preset_params,
+                start_at_seconds=resume_offset_seconds,
+            )
+
+    # Delegate VideoToolbox codecs to the ffmpeg backend (Apple Silicon)
+    from clutch.ffmpeg_converter import is_vt_codec, is_vt_available
+    codec_lower = str(codec or "").strip().lower()
+    vt_via_preset = _preset_requests_vt(preset_params)
+    if is_vt_codec(codec_lower) or vt_via_preset:
+        if not is_vt_available():
+            warning("VideoToolbox encoder requested but not available. Falling back to software encoder.")
+            if vt_via_preset:
+                preset_params = _build_software_fallback_preset(preset_params)
             elif "265" in codec_lower or "hevc" in codec_lower:
                 codec = "x265"
             else:

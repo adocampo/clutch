@@ -27,6 +27,8 @@ CODEC_TO_FORMAT = {
     'vaapi_h265': 'HEVC',
     'vaapi_hevc': 'HEVC',
     'vaapi_av1': 'AV1',
+    'vt_h264': 'AVC',
+    'vt_h265': 'HEVC',
     'av1_nvenc': 'AV1',
     'av1_qsv': 'AV1',
     'av1_auto': 'AV1',

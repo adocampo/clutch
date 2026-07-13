@@ -747,7 +747,7 @@ def main():
     # ── Encoding ─────────────────────────────
     enc_group = parser.add_argument_group("encoding")
     enc_group.add_argument("-c", "--codec", default="nvenc_h265",
-                           help="Video codec: nvenc_h265 (default), nvenc_h264, vce_h265, vce_h264, vaapi_h265, vaapi_h264, vaapi_av1 (ffmpeg VA-API), av1_auto (GPU auto-detect), svt_av1 (CPU), x265.")
+                           help="Video codec: nvenc_h265 (default), nvenc_h264, vce_h265, vce_h264, vaapi_h265, vaapi_h264, vaapi_av1 (ffmpeg VA-API), vt_h265, vt_h264 (Apple Silicon), av1_auto (GPU auto-detect), svt_av1 (CPU), x265.")
     enc_group.add_argument("--preset", default="",
                            help="Use a saved preset by name (custom or official HandBrake preset).")
     enc_group.add_argument("-s", "--slow", action="store_true", help="Use slow encoding speed.")

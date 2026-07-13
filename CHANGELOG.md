@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] - 2026-07-13
+
+### Added in 2.5.0
+
+- **Apple Silicon (VideoToolbox) support**: full hardware encoding via ffmpeg on M-series Macs. New codecs `vt_h265` and `vt_h264` use VideoToolbox for GPU-accelerated encode/decode. Auto-detected on macOS with smoke-test validation; hidden on non-Apple systems.
+- **Dashboard Apple codec options**: H.265 (Apple) and H.264 (Apple) entries in all codec dropdowns, hidden automatically when not on macOS.
+- **Built-in Apple presets**: H.265 (Apple) and H.264 (Apple) cards in the presets gallery.
+- **10-bit HDR support on Apple Silicon**: automatic main10 profile selection for HDR sources.
+
 ## [2.4.3] - 2026-07-13
 
 ### Fixed in 2.4.3
