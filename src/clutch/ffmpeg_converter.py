@@ -271,6 +271,9 @@ def build_ffmpeg_command(
 
     cmd.extend(["-i", input_file])
 
+    # Explicit stream mapping: video first, then audio (added in _build_audio_args)
+    cmd.extend(["-map", "0:v"])
+
     # Video filter chain
     vf_parts = []
 
@@ -359,7 +362,7 @@ def _build_audio_args(
 ):
     """Append audio encoding arguments to the ffmpeg command."""
     # Map all audio streams
-    cmd.extend(["-map", "0:a?"])
+    cmd.extend(["-map", "0:a"])
 
     # Map the ffmpeg audio encoder name
     ffmpeg_audio_encoder = _map_audio_encoder(encoder)
@@ -374,14 +377,16 @@ def _build_audio_args(
         # Encode mode
         cmd.extend(["-c:a", ffmpeg_audio_encoder])
 
-        # libopus needs mapping_family=1 for multichannel layouts like 5.1(side)
-        # that aren't supported by the default mapping_family (-1 auto).
+        # Normalize channel layouts for libopus: ffmpeg 7+/8 rejects non-standard
+        # layouts like 5.1(side) even with mapping_family=1. The aformat filter
+        # remaps them to standard 5.1 (with back channels) before encoding.
         if ffmpeg_audio_encoder == "libopus":
+            cmd.extend(["-af", "aformat=channel_layouts=7.1|5.1|stereo|mono"])
             cmd.extend(["-mapping_family", "1"])
 
         if not bitrate:
             # Auto bitrate based on source channels
-            audio_info = get_audio_info(input_file, data=source_info)
+            audio_info = get_audio_info(input_file)
             if audio_info:
                 # Use highest channel count to set bitrate
                 max_channels = max(int(t.get("Channels", 2)) for t in audio_info)

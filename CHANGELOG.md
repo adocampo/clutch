@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.2] - 2026-07-13
+
+### Fixed in 2.4.2
+
+- **ffmpeg libopus crash with 5.1(side) audio (real fix)**: `-mapping_family 1` alone was not enough on ffmpeg 8.x. Added `aformat=channel_layouts=7.1|5.1|stereo|mono` audio filter to normalize non-standard layouts (e.g. `5.1(side)` → `5.1`) before encoding. Also added explicit `-map 0:v` and `-map 0:a` stream mapping and fixed auto-bitrate detection for multichannel audio (was passing wrong data to `get_audio_info`).
+
 ## [2.4.1] - 2026-07-13
 
 ### Fixed in 2.4.1
