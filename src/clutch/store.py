@@ -1373,6 +1373,11 @@ class JobStore:
                 # Only set columns that exist in the current schema
                 valid = {k: v for k, v in sc.items() if k in cols}
                 if valid:
+                    # Ensure the singleton row exists before updating
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO service_config (singleton, allowed_roots_json, default_job_settings_json) "
+                        "VALUES (1, '[]', '{}')"
+                    )
                     set_clause = ", ".join(f"{k} = ?" for k in valid)
                     self._conn.execute(
                         f"UPDATE service_config SET {set_clause} WHERE singleton = 1",

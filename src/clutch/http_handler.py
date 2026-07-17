@@ -1473,6 +1473,8 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
                 config = svc.store.load_service_config()
                 if config:
                     svc.update_service_settings(config)
+                # Reload watchers into the running service
+                svc.reload_watchers_from_db()
                 info(f"Configuration imported from backup (exported {payload.get('exported_at', 'unknown')}).")
                 self._send_json(200, {"ok": True, "message": "Configuration imported successfully."})
             except json.JSONDecodeError as exc:

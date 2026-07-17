@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.1] - 2026-07-17
+
+### Fixed in 2.5.1
+
+- **Backup restore not working**: importing a backup did not reload watchers into the running service — the dashboard kept showing old watchers until restart. Now watchers are destroyed and recreated from DB immediately after import.
+- **Backup import on fresh DB**: `import_config` used a bare UPDATE for `service_config` which silently did nothing when no row existed yet. Changed to INSERT OR REPLACE so the config is always written.
+
 ## [2.5.0] - 2026-07-13
 
 ### Added in 2.5.0

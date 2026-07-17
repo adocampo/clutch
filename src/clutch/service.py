@@ -860,6 +860,40 @@ class ConversionService:
         self.store.delete_watcher_config(watcher_id)
         return watcher.to_summary()
 
+    def reload_watchers_from_db(self):
+        """Stop all running watchers and reload from the database.
+
+        Used after a configuration import to sync the in-memory watcher pool
+        with the freshly-imported DB state.
+        """
+        with self._watchers_lock:
+            old_watchers = list(self._watchers.values())
+            self._watchers.clear()
+        for w in old_watchers:
+            w.stop()
+
+        persisted = self.store.list_watcher_configs()
+        with self._watchers_lock:
+            for wc in persisted:
+                watcher = DirectoryWatcher(
+                    self,
+                    str(wc["id"]),
+                    str(wc["directory"]),
+                    recursive=bool(wc["recursive"]),
+                    poll_interval=float(wc["poll_interval"]),
+                    settle_time=float(wc["settle_time"]),
+                    delete_source=bool(wc.get("delete_source", False)),
+                    output_dir=str(wc.get("output_dir") or ""),
+                    codec=str(wc.get("codec") or ""),
+                    encode_speed=str(wc.get("encode_speed") or ""),
+                    audio_passthrough=wc.get("audio_passthrough"),
+                    force=wc.get("force"),
+                    preset_id=wc.get("preset_id"),
+                )
+                self._watchers[watcher.watcher_id] = watcher
+        if self._service_started:
+            self.start_watchers()
+
     def list_watchers(self) -> List[Dict[str, object]]:
         with self._watchers_lock:
             watchers = list(self._watchers.values())
