@@ -283,9 +283,23 @@
                         <option value="skipped" data-i18n="activity.status_skipped">Skipped</option>
                         <option value="succeeded" data-i18n="activity.status_succeeded">Succeeded</option>
                     </select>
+                    <label for="jobs-page-size" class="visually-hidden" data-i18n="activity.page_size_label">Show</label>
+                    <select id="jobs-page-size" data-i18n-title="activity.page_size_title"
+                        title="Number of jobs to show per page.">
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="all" data-i18n="activity.page_size_all">All</option>
+                        <option value="custom" data-i18n="activity.page_size_custom">Custom…</option>
+                    </select>
+                    <input id="jobs-page-size-custom" type="number" min="1" step="1" hidden
+                        data-i18n-placeholder="activity.page_size_custom_placeholder" placeholder="Custom limit"
+                        data-i18n-title="activity.page_size_custom_title" title="Enter a custom page size and press Enter.">
                     <span class="jobs-count" id="jobs-count"></span>
                 </div>
                 <div id="jobs-container"></div>
+                <div class="jobs-pagination" id="jobs-pagination"></div>
             </div>
         </section>
 

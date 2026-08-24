@@ -860,6 +860,38 @@ class ConversionService:
         self.store.delete_watcher_config(watcher_id)
         return watcher.to_summary()
 
+    def rescan_watcher(self, watcher_id: str) -> Optional[Dict[str, object]]:
+        """Restart a watcher so it re-seeds and re-scans its directory."""
+        with self._watchers_lock:
+            watcher = self._watchers.get(watcher_id)
+        if watcher is None:
+            return None
+
+        watcher.stop()
+        refreshed = DirectoryWatcher(
+            self,
+            watcher.watcher_id,
+            watcher.directory,
+            recursive=watcher.recursive,
+            poll_interval=watcher.poll_interval,
+            settle_time=watcher.settle_time,
+            delete_source=watcher.delete_source,
+            output_dir=watcher.output_dir,
+            codec=watcher.codec,
+            encode_speed=watcher.encode_speed,
+            audio_passthrough=watcher.audio_passthrough,
+            force=watcher.force,
+            preset_id=watcher.preset_id,
+        )
+
+        with self._watchers_lock:
+            self._watchers[watcher_id] = refreshed
+
+        if self._service_started:
+            refreshed.start()
+
+        return refreshed.to_summary()
+
     def reload_watchers_from_db(self):
         """Stop all running watchers and reload from the database.
 
@@ -1794,8 +1826,15 @@ class ConversionService:
             "message": f"Queued {count} job{'s' if count != 1 else ''} from directory{recursive_label}: {directory_label}",
         }
 
-    def list_jobs(self, limit: int = 50) -> List[Dict[str, object]]:
-        return self.store.list_jobs(limit=limit)
+    def list_jobs(
+        self,
+        *,
+        page: int = 1,
+        limit: int = 100,
+        status: str = "",
+        search: str = "",
+    ) -> Dict[str, object]:
+        return self.store.list_jobs(page=page, limit=limit, status=status, search=search)
 
     def get_job(self, job_id: str) -> Optional[Dict[str, object]]:
         return self.store.get(job_id)

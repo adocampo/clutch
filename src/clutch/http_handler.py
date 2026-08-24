@@ -1090,7 +1090,29 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/jobs":
-            self._send_json(200, {"jobs": self.server.service.list_jobs()})
+            status_filter = str(query.get("status") or "").strip()
+            search = str(query.get("search") or "").strip()
+            try:
+                page = max(1, int(query.get("page") or 1))
+            except (ValueError, TypeError):
+                page = 1
+
+            raw_limit = str(query.get("limit") or "100").strip().lower()
+            if raw_limit == "all":
+                limit = 0
+            else:
+                try:
+                    limit = max(1, min(100000, int(raw_limit)))
+                except (ValueError, TypeError):
+                    limit = 100
+
+            result = self.server.service.list_jobs(
+                page=page,
+                limit=limit,
+                status=status_filter,
+                search=search,
+            )
+            self._send_json(200, result)
             return
 
         if path.startswith("/jobs/"):
@@ -1566,6 +1588,23 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(201, preset)
+            return
+
+        if path.startswith("/watchers/") and path.endswith("/rescan"):
+            user = self._require_role("operator")
+            if not user:
+                return
+            prefix = "/watchers/"
+            suffix = "/rescan"
+            watcher_id = path[len(prefix):-len(suffix)].strip("/")
+            if not watcher_id:
+                self._send_json(400, {"error": "Watcher ID is required."})
+                return
+            watcher = self.server.service.rescan_watcher(watcher_id)
+            if not watcher:
+                self._send_json(404, {"error": "Watcher not found."})
+                return
+            self._send_json(200, watcher)
             return
 
         if path == "/watchers":

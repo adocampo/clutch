@@ -807,21 +807,46 @@ class JobStore:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM watchers WHERE id = ?", (watcher_id,))
 
-    def list_jobs(self, limit: int = 50) -> List[Dict[str, object]]:
+    def list_jobs(
+        self,
+        *,
+        page: int = 1,
+        limit: int = 100,
+        status: str = "",
+        search: str = "",
+    ) -> Dict[str, object]:
+        conditions: List[str] = []
+        params: list = []
+
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if search:
+            conditions.append("(input_file LIKE ? OR output_file LIKE ? OR message LIKE ?)")
+            pattern = f"%{search}%"
+            params.extend([pattern, pattern, pattern])
+
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
         with self._lock:
-            rows = self._conn.execute(
-                """
-                SELECT * FROM jobs WHERE status IN ('running', 'paused', 'cancelling', 'queued')
-                UNION
-                SELECT * FROM (
-                    SELECT * FROM jobs WHERE status NOT IN ('running', 'paused', 'cancelling', 'queued')
-                    ORDER BY submitted_at DESC LIMIT ?
-                )
-                ORDER BY submitted_at DESC
-                """,
-                (limit,),
-            ).fetchall()
-        return [self._hydrate_record(row) for row in rows]
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM jobs" + where, params
+            ).fetchone()[0]
+
+            if limit == 0:
+                rows = self._conn.execute(
+                    "SELECT * FROM jobs" + where + " ORDER BY submitted_at DESC",
+                    params,
+                ).fetchall()
+            else:
+                offset = (page - 1) * limit
+                rows = self._conn.execute(
+                    "SELECT * FROM jobs" + where + " ORDER BY submitted_at DESC LIMIT ? OFFSET ?",
+                    params + [limit, offset],
+                ).fetchall()
+
+        entries = [self._hydrate_record(row) for row in rows]
+        return {"jobs": entries, "total": int(total), "page": int(page), "limit": int(limit)}
 
     def list_tasks(
         self,

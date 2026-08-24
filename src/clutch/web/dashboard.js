@@ -51,12 +51,19 @@
         },
         dateFormat: 'YYYY-MM-DD',
         displayTimezone: '',
+        jobsPaging: {
+            page: 1,
+            limit: 100,
+            total: 0,
+        },
     };
 
     const tokenStorageKey = 'clutch-token';
     const themeStorageKey = 'clutch-theme';
     const legacyThemeStorageKey = 'convert-video-theme';
     const expandedJobsStorageKey = 'clutch-expanded-jobs';
+    const jobsPageSizeStorageKey = 'clutch-jobs-page-size';
+    const jobsPageSizeCustomStorageKey = 'clutch-jobs-page-size-custom';
 
     const statusPriority = {
         running: 0,
@@ -78,7 +85,10 @@
     const jobsContainer = document.getElementById('jobs-container');
     const jobsFilterText = document.getElementById('jobs-filter-text');
     const jobsFilterStatus = document.getElementById('jobs-filter-status');
+    const jobsPageSize = document.getElementById('jobs-page-size');
+    const jobsPageSizeCustom = document.getElementById('jobs-page-size-custom');
     const jobsCount = document.getElementById('jobs-count');
+    const jobsPagination = document.getElementById('jobs-pagination');
     const toggleExpandJobsButton = document.getElementById('toggle-expand-jobs');
     const bulkActionsBar = document.getElementById('bulk-actions');
     const bulkActionsCount = document.getElementById('bulk-actions-count');
@@ -2380,6 +2390,7 @@
                         <td class="watcher-cell-center">${audioPt ? check : dash}</td>
                         <td class="watcher-cell-center">${force ? check : dash}</td>
                         <td class="watcher-actions">
+                            <button class="inline-button" type="button" data-rescan-watcher="${watcher.id}" title="${escapeHtml(i18n.t('watchers.rescan_title'))}"${disabledAttr}>${i18n.t('watchers.rescan')}</button>
                             <button class="inline-button-warn" type="button" data-edit-watcher="${watcher.id}" title="${escapeHtml(i18n.t('watchers.edit_title'))}"${disabledAttr}>${i18n.t('common.edit')}</button>
                             <button class="inline-button" type="button" data-remove-watcher="${watcher.id}" title="${escapeHtml(i18n.t('watchers.remove_title'))}"${disabledAttr}>${i18n.t('common.remove')}</button>
                         </td>
@@ -2429,9 +2440,26 @@
                     scrollAndHighlight(watcherForm);
                     // Disable all Edit/Remove buttons while editing
                     Array.prototype.forEach.call(
-                        watchersContainer.querySelectorAll('[data-edit-watcher], [data-remove-watcher]'),
+                        watchersContainer.querySelectorAll('[data-rescan-watcher], [data-edit-watcher], [data-remove-watcher]'),
                         function (btn) { btn.disabled = true; }
                     );
+                });
+            }
+        );
+
+        Array.prototype.forEach.call(
+            watchersContainer.querySelectorAll('[data-rescan-watcher]'),
+            function (button) {
+                button.addEventListener('click', async function () {
+                    button.disabled = true;
+                    try {
+                        await fetchJson(`/watchers/${button.dataset.rescanWatcher}/rescan`, { method: 'POST' });
+                        setStatus(watcherStatus, i18n.t('toast.watcher_rescanned'), 'ok');
+                        await refreshSummary();
+                    } catch (error) {
+                        setStatus(watcherStatus, error.message, 'error');
+                        button.disabled = false;
+                    }
                 });
             }
         );
@@ -2534,14 +2562,53 @@
         });
     }
 
-    function filterJobs(jobs) {
-        var text = jobsFilterText.value.trim().toLowerCase();
-        var status = jobsFilterStatus.value;
-        return jobs.filter(function (job) {
-            if (status && job.status !== status) return false;
-            if (text && basename(job.input_file).toLowerCase().indexOf(text) === -1) return false;
-            return true;
-        });
+    function getActivityLimitForQuery() {
+        if (!jobsPageSize) return 100;
+        if (jobsPageSize.value === 'all') return 0;
+        if (jobsPageSize.value === 'custom') {
+            var custom = Number(jobsPageSizeCustom && jobsPageSizeCustom.value ? jobsPageSizeCustom.value : 0);
+            return Number.isFinite(custom) && custom > 0 ? Math.floor(custom) : Math.max(1, Number(state.jobsPaging.limit || 100));
+        }
+        var parsed = Number(jobsPageSize.value || 100);
+        return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 100;
+    }
+
+    function persistActivityPageSizePreferences() {
+        if (!jobsPageSize) return;
+        try {
+            window.localStorage.setItem(jobsPageSizeStorageKey, jobsPageSize.value || '100');
+            if (jobsPageSizeCustom) {
+                var custom = Number(jobsPageSizeCustom.value || 0);
+                if (Number.isFinite(custom) && custom > 0) {
+                    window.localStorage.setItem(jobsPageSizeCustomStorageKey, String(Math.floor(custom)));
+                }
+            }
+        } catch (e) { /* noop */ }
+    }
+
+    function restoreActivityPageSizePreferences() {
+        if (!jobsPageSize) return;
+        try {
+            var stored = window.localStorage.getItem(jobsPageSizeStorageKey);
+            if (stored && ['10', '20', '50', '100', 'all', 'custom'].indexOf(stored) !== -1) {
+                jobsPageSize.value = stored;
+            }
+            if (jobsPageSizeCustom) {
+                var storedCustom = Number(window.localStorage.getItem(jobsPageSizeCustomStorageKey) || 0);
+                if (Number.isFinite(storedCustom) && storedCustom > 0) {
+                    jobsPageSizeCustom.value = String(Math.floor(storedCustom));
+                }
+            }
+        } catch (e) { /* noop */ }
+    }
+
+    function syncActivityPageSizeUi() {
+        if (!jobsPageSize || !jobsPageSizeCustom) return;
+        var isCustom = jobsPageSize.value === 'custom';
+        jobsPageSizeCustom.hidden = !isCustom;
+        if (isCustom && !jobsPageSizeCustom.value) {
+            jobsPageSizeCustom.value = String(Math.max(1, Number(state.jobsPaging.limit || 100)));
+        }
     }
 
     function shouldShowJobOpen(job) {
@@ -2642,6 +2709,23 @@
         } else {
             jobsCount.textContent = i18n.t('activity.jobs_filtered', { filtered: filtered, total: total });
         }
+    }
+
+    function renderJobsPagination(total, page, limit) {
+        if (!jobsPagination) return;
+        if (limit === 0) {
+            jobsPagination.innerHTML = '';
+            return;
+        }
+        var totalPages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
+        if (totalPages <= 1) {
+            jobsPagination.innerHTML = '';
+            return;
+        }
+        var html = '<button type="button"' + (page <= 1 ? ' disabled' : '') + ' data-jobpage="' + (page - 1) + '">&laquo; ' + i18n.t('pagination.prev') + '</button>';
+        html += '<span>' + i18n.t('pagination.page_info', { page: page, totalPages: totalPages, total: total }) + '</span>';
+        html += '<button type="button"' + (page >= totalPages ? ' disabled' : '') + ' data-jobpage="' + (page + 1) + '">' + i18n.t('pagination.next') + ' &raquo;</button>';
+        jobsPagination.innerHTML = html;
     }
 
     function updateToggleExpandButton() {
@@ -2751,27 +2835,26 @@
         await refreshJobs();
     }
 
-    function renderJobs(jobs) {
+    function renderJobs(jobs, total) {
         state.lastJobs = jobs.slice();
-        var filtered = filterJobs(jobs);
-        updateJobsCount(filtered.length, jobs.length);
-        if (!filtered.length) {
+        updateJobsCount(jobs.length, total);
+        if (!jobs.length) {
             state.expandedJobs = {};
             persistExpandedJobs();
             state.activeQueueJobId = '';
             state.queueJobIds = [];
             state.selectedJobs.clear();
             updateBulkActionsBar();
-            jobsContainer.innerHTML = jobs.length
+            jobsContainer.innerHTML = total > 0
                 ? '<div class="empty">' + i18n.t('activity.no_jobs_filter') + '</div>'
                 : '<div class="empty">' + i18n.t('activity.no_jobs_yet') + '</div>';
             updateToggleExpandButton();
             return;
         }
 
-        pruneExpandedJobs(filtered);
+        pruneExpandedJobs(jobs);
 
-        const sortedJobs = sortJobs(filtered);
+        const sortedJobs = sortJobs(jobs);
         // Prune selections to only visible job IDs
         pruneSelectedJobs(sortedJobs.map(function (j) { return j.id; }));
         ensureActiveQueueJob(sortedJobs);
@@ -4587,9 +4670,37 @@
         renderWatchers(payload.watchers || []);
     }
 
-    async function refreshJobs() {
-        const payload = await fetchJson('/jobs');
-        renderJobs(payload.jobs || []);
+    async function refreshJobs(options) {
+        var opts = options || {};
+        if (opts.resetPage) {
+            state.jobsPaging.page = 1;
+        }
+
+        var page = Math.max(1, Number(state.jobsPaging.page || 1));
+        var limit = getActivityLimitForQuery();
+        var params = '?page=' + page + '&limit=' + (limit === 0 ? 'all' : limit);
+        var status = jobsFilterStatus ? jobsFilterStatus.value : '';
+        var search = jobsFilterText ? jobsFilterText.value.trim() : '';
+        if (status) params += '&status=' + encodeURIComponent(status);
+        if (search) params += '&search=' + encodeURIComponent(search);
+
+        const payload = await fetchJson('/jobs' + params);
+        var total = Number(payload.total || 0);
+        var currentLimit = Number(payload.limit);
+        if (!Number.isFinite(currentLimit) || currentLimit < 0) currentLimit = limit;
+        var totalPages = currentLimit === 0 ? 1 : Math.max(1, Math.ceil(total / Math.max(1, currentLimit)));
+        var currentPage = Number(payload.page || page);
+        if (currentPage > totalPages) {
+            state.jobsPaging.page = totalPages;
+            return refreshJobs();
+        }
+
+        state.jobsPaging.page = currentPage;
+        state.jobsPaging.limit = currentLimit;
+        state.jobsPaging.total = total;
+
+        renderJobs(payload.jobs || [], total);
+        renderJobsPagination(total, currentPage, currentLimit);
     }
 
     async function refreshAll() {
@@ -4823,12 +4934,16 @@
         refreshAll();
     });
 
+    var jobsSearchTimeout;
     jobsFilterText.addEventListener('input', function () {
-        renderJobs(state.lastJobs);
+        clearTimeout(jobsSearchTimeout);
+        jobsSearchTimeout = setTimeout(function () {
+            refreshJobs({ resetPage: true });
+        }, 350);
     });
 
     jobsFilterStatus.addEventListener('change', function () {
-        renderJobs(state.lastJobs);
+        refreshJobs({ resetPage: true });
     });
 
     var jobsFilterClear = document.getElementById('jobs-filter-clear');
@@ -4836,7 +4951,40 @@
         jobsFilterClear.addEventListener('click', function () {
             jobsFilterText.value = '';
             jobsFilterStatus.value = '';
-            renderJobs(state.lastJobs);
+            refreshJobs({ resetPage: true });
+        });
+    }
+
+    if (jobsPageSize) {
+        jobsPageSize.addEventListener('change', function () {
+            syncActivityPageSizeUi();
+            persistActivityPageSizePreferences();
+            refreshJobs({ resetPage: true });
+        });
+    }
+
+    if (jobsPageSizeCustom) {
+        jobsPageSizeCustom.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                persistActivityPageSizePreferences();
+                refreshJobs({ resetPage: true });
+            }
+        });
+        jobsPageSizeCustom.addEventListener('blur', function () {
+            if (jobsPageSize && jobsPageSize.value === 'custom') {
+                persistActivityPageSizePreferences();
+                refreshJobs({ resetPage: true });
+            }
+        });
+    }
+
+    if (jobsPagination) {
+        jobsPagination.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-jobpage]');
+            if (!btn) return;
+            state.jobsPaging.page = Math.max(1, parseInt(btn.dataset.jobpage, 10) || 1);
+            refreshJobs();
         });
     }
 
@@ -6569,6 +6717,8 @@
         var currentLang = i18n.getLang();
         if (generalLanguageSelect) generalLanguageSelect.value = currentLang;
         if (userSettingsLanguageSelect) userSettingsLanguageSelect.value = currentLang;
+        restoreActivityPageSizePreferences();
+        syncActivityPageSizeUi();
         updateAutoRefreshButton();
         return initAuth();
     }).then(function () {

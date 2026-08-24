@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.0] - 2026-08-24
+
+### Added in 2.6.0
+
+- **Activity pagination controls**: the Activity view now supports paged loading with page size options (`10`, `20`, `50`, `100`, `All`) plus a custom limit input.
+- **Server-side Activity filtering**: status and text filters are now executed by the backend jobs endpoint (`page`, `limit`, `status`, `search`) so large histories stay responsive.
+- **Persistent Activity page-size preference**: the selected page size (including custom value) is stored in browser local storage and restored automatically on reload.
+- **Watcher rescan action**: each watcher row now includes a **Rescan** button that restarts that watcher and re-seeds directory scanning without requiring edit/save.
+
+### Changed in 2.6.0
+
+- **Activity visibility model**: Activity no longer has a hard-coded "last 50 finished jobs" behavior; visible results now follow the selected pagination/filter settings.
+- **Jobs API response shape**: `GET /jobs` now returns paginated metadata (`jobs`, `total`, `page`, `limit`) to support scalable dashboard rendering.
+
 ## [2.5.1] - 2026-07-17
 
 ### Fixed in 2.5.1
