@@ -77,6 +77,7 @@ _DOUBLE_PRESS_INTERVAL = 1.5  # seconds
 _nvenc_available_cache: Optional[bool] = None
 _vce_available_cache: Optional[bool] = None
 _vaapi_fallback_cache: Optional[bool] = None
+_STALL_TIMEOUT_SECONDS = max(0, int(float(os.environ.get("CLUTCH_STALL_TIMEOUT_SECONDS", "5400"))))
 
 
 def get_last_failure_reason() -> str:
@@ -1283,6 +1284,7 @@ def _consume_log_output(
 ):
     buf = b""
     offset = 0
+    last_activity_at = time.monotonic()
 
     def flush_buffer(chunk_buffer: bytes) -> bytes:
         while b"\r" in chunk_buffer or b"\n" in chunk_buffer:
@@ -1300,18 +1302,20 @@ def _consume_log_output(
                 line_handler(line)
         return chunk_buffer
 
-    def read_available() -> None:
-        nonlocal buf, offset
+    def read_available() -> bool:
+        nonlocal buf, offset, last_activity_at
         if not os.path.exists(log_path):
-            return
+            return False
         with open(log_path, "rb") as handle:
             handle.seek(offset)
             chunk = handle.read()
         if not chunk:
-            return
+            return False
         offset += len(chunk)
         buf += chunk
         buf = flush_buffer(buf)
+        last_activity_at = time.monotonic()
+        return True
 
     while True:
         read_available()
@@ -1322,6 +1326,19 @@ def _consume_log_output(
         process_running = process.poll() is None if process is not None else is_conversion_process_alive(process_id)
         if not process_running:
             read_available()
+            break
+
+        if _STALL_TIMEOUT_SECONDS > 0 and (time.monotonic() - last_activity_at) >= _STALL_TIMEOUT_SECONDS:
+            pid = process.pid if process is not None else int(process_id or 0)
+            timeout_mins = max(1, int(round(_STALL_TIMEOUT_SECONDS / 60.0)))
+            warning(
+                f"No conversion progress detected for {timeout_mins} minutes (pid={pid}). "
+                "Stopping stalled encoder process."
+            )
+            if process is not None:
+                _stop_process_tree(process)
+            else:
+                request_conversion_stop_by_pid(process_id)
             break
 
         time.sleep(0.1)

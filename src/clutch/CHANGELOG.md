@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.1] - 2026-08-24
+
+### Fixed in 2.6.1
+
+- **Stalled conversion watchdog**: conversion jobs that stop emitting progress/log activity for too long are now detected and force-stopped so they no longer block the worker queue indefinitely. The timeout is configurable with `CLUTCH_STALL_TIMEOUT_SECONDS` (default: `5400`, set `0` to disable).
+
 ## [2.6.0] - 2026-08-24
 
 ### Added in 2.6.0
