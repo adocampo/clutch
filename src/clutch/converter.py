@@ -218,11 +218,52 @@ def is_conversion_process_alive(process_id: Optional[int]) -> bool:
     pid = int(process_id or 0)
     if pid <= 0:
         return False
+    if os.name != "nt":
+        # Zombies still answer kill(pid, 0) but cannot make conversion progress.
+        try:
+            with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as handle:
+                stat_line = handle.read().strip()
+            state_start = stat_line.rfind(") ")
+            if state_start != -1:
+                state = stat_line[state_start + 2:state_start + 3]
+                if state == "Z":
+                    return False
+        except OSError:
+            pass
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def is_conversion_process_for_temp_file(process_id: Optional[int], temp_file: str) -> bool:
+    """Return True only when the PID belongs to HandBrakeCLI for the expected temp file."""
+    pid = int(process_id or 0)
+    expected_temp = str(temp_file or "").strip()
+    if pid <= 0 or not expected_temp:
+        return False
+    if not is_conversion_process_alive(pid):
+        return False
+    # On Unix we can verify the exact process command line through /proc.
+    if os.name == "nt":
+        return True
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return True
+
+    args = [part.decode("utf-8", errors="replace") for part in raw.split(b"\0") if part]
+    if not args:
+        return False
+
+    expected_norm = os.path.abspath(expected_temp)
+    arg_norms = [os.path.abspath(arg) for arg in args]
+    is_handbrake = any(os.path.basename(arg).lower() == "handbrakecli" for arg in args)
+    if not is_handbrake:
+        return False
+    return expected_norm in arg_norms
 
 
 def _signal_process_id(process_id: Optional[int], sig: int) -> bool:

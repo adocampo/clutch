@@ -283,7 +283,8 @@
                         <option value="skipped" data-i18n="activity.status_skipped">Skipped</option>
                         <option value="succeeded" data-i18n="activity.status_succeeded">Succeeded</option>
                     </select>
-                    <label for="jobs-page-size" class="visually-hidden" data-i18n="activity.page_size_label">Show</label>
+                    <label for="jobs-page-size" class="visually-hidden"
+                        data-i18n="activity.page_size_label">Show</label>
                     <select id="jobs-page-size" data-i18n-title="activity.page_size_title"
                         title="Number of jobs to show per page.">
                         <option value="10">10</option>
@@ -295,7 +296,8 @@
                     </select>
                     <input id="jobs-page-size-custom" type="number" min="1" step="1" hidden
                         data-i18n-placeholder="activity.page_size_custom_placeholder" placeholder="Custom limit"
-                        data-i18n-title="activity.page_size_custom_title" title="Enter a custom page size and press Enter.">
+                        data-i18n-title="activity.page_size_custom_title"
+                        title="Enter a custom page size and press Enter.">
                     <span class="jobs-count" id="jobs-count"></span>
                 </div>
                 <div id="jobs-container"></div>
@@ -418,7 +420,8 @@
                         <div class="field-row">
                             <label class="field-row-label" data-i18n="jobs.codec_label">Codec</label>
                             <div class="field-row-control">
-                                <select name="codec" data-i18n-title="jobs.codec_title" title="Encoder profile." data-codec-select>
+                                <select name="codec" data-i18n-title="jobs.codec_title" title="Encoder profile."
+                                    data-codec-select>
                                     <option value="nvenc_h265" data-hw="nvenc">H.265 (NVIDIA)</option>
                                     <option value="nvenc_h264" data-hw="nvenc">H.264 (NVIDIA)</option>
                                     <option value="vce_h265" data-hw="vce">H.265 (AMD)</option>
@@ -2060,7 +2063,8 @@
                 <fieldset class="options-section">
                     <legend data-i18n="settings.backup.export_legend">Export Configuration</legend>
                     <p class="small" data-i18n="settings.backup.export_desc">Download a complete backup of all settings,
-                        presets, users, tokens, SMTP configuration, notification channels, watchers, and defaults. Passwords
+                        presets, users, tokens, SMTP configuration, notification channels, watchers, and defaults.
+                        Passwords
                         and secrets are included in hashed form.</p>
                     <div class="actions actions-centered">
                         <button class="primary" type="button" id="backup-export-btn"

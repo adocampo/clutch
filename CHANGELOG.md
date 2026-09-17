@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.3] - 2026-09-17
+
+### Fixed in 2.6.3
+
+- **ISO title selection crash**: `NameError: name 'display_titles' is not defined` when selecting titles from ISO images. The `display_titles` function was called in `service.py` but never imported from `clutch.iso`.
+- **Stale conversion tracking**: conversions that were interrupted left their temp files blocking the worker queue. Added zombie-process detection (reads `/proc/{pid}/stat` to skip `Z` state) and a new `is_conversion_process_for_temp_file()` helper that validates a PID actually belongs to HandBrakeCLI for the expected temp file by reading `/proc/{pid}/cmdline`. This prevents stale PIDs from being reused across unrelated jobs.
+- **Dashboard HTML formatting**: minor whitespace adjustments in filter controls and backup export description.
+
 ## [2.6.2] - 2026-09-17
 
 ### Fixed in 2.6.2
