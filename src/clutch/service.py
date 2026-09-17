@@ -33,6 +33,7 @@ from clutch.converter import (
     get_visible_amd_gpus,
     get_visible_nvidia_gpus,
     is_conversion_process_alive,
+    is_conversion_process_for_temp_file,
     is_nvenc_available,
     is_vaapi_fallback_available,
     is_vt_available_cached,
@@ -48,7 +49,7 @@ from clutch.converter import (
     uses_vce_encoder,
 )
 from clutch.http_handler import ConversionHTTPServer, ServiceRequestHandler
-from clutch.iso import is_iso_file, scan_iso, select_main_title
+from clutch.iso import is_iso_file, scan_iso, select_main_title, display_titles
 from clutch.mediainfo import VIDEO_EXTENSIONS, check_already_converted, extract_media_summary, get_media_duration_seconds
 from clutch.notifications import NotificationManager
 from clutch.output import error as print_error
@@ -2243,6 +2244,7 @@ class ConversionService:
             return "cancelled", "", "Cancelled from the web UI."
 
         existing_process_id = int(record.get("process_id") or 0) or None
+        runtime_temp_file = str(record.get("temp_file") or "").strip()
         debug(f"[{job_id[:8]}] _execute_regular_job: existing_process_id={existing_process_id}, status={record.get('status')}, temp_file={bool(record.get('temp_file'))}, resume_on_start={record.get('resume_on_start')}")
         if existing_process_id and not is_conversion_process_alive(existing_process_id):
             info(f"[{job_id[:8]}] Previous HandBrake process {existing_process_id} is no longer running.")
@@ -2252,6 +2254,22 @@ class ConversionService:
                 job_id,
                 process_id=None,
                 temp_file=str(record.get("temp_file") or ""),
+                log_file=str(record.get("log_file") or ""),
+                final_output_file=str(record.get("final_output_file") or ""),
+                resume_on_start=False,
+            )
+            existing_process_id = None
+        elif existing_process_id and runtime_temp_file and not is_conversion_process_for_temp_file(existing_process_id, runtime_temp_file):
+            warning(
+                f"[{job_id[:8]}] Runtime PID {existing_process_id} does not match temp file "
+                f"{os.path.basename(runtime_temp_file)}. Treating runtime as stale."
+            )
+            if record.get("status") == "paused":
+                self.store.resume(job_id, "Stale runtime PID detected. Attempting partial resume.", resume_on_start=False)
+            self.store.set_runtime(
+                job_id,
+                process_id=None,
+                temp_file=runtime_temp_file,
                 log_file=str(record.get("log_file") or ""),
                 final_output_file=str(record.get("final_output_file") or ""),
                 resume_on_start=False,
@@ -2359,6 +2377,7 @@ class ConversionService:
             return "cancelled", "", "Cancelled from the web UI."
 
         existing_process_id = int(record.get("process_id") or 0) or None
+        runtime_temp_file = str(record.get("temp_file") or "").strip()
         if existing_process_id and not is_conversion_process_alive(existing_process_id):
             info(f"[{job_id[:8]}] Previous HandBrake process {existing_process_id} is no longer running.")
             if record.get("status") == "paused":
@@ -2367,6 +2386,22 @@ class ConversionService:
                 job_id,
                 process_id=None,
                 temp_file=str(record.get("temp_file") or ""),
+                log_file=str(record.get("log_file") or ""),
+                final_output_file=str(record.get("final_output_file") or ""),
+                resume_on_start=False,
+            )
+            existing_process_id = None
+        elif existing_process_id and runtime_temp_file and not is_conversion_process_for_temp_file(existing_process_id, runtime_temp_file):
+            warning(
+                f"[{job_id[:8]}] Runtime PID {existing_process_id} does not match temp file "
+                f"{os.path.basename(runtime_temp_file)}. Treating runtime as stale."
+            )
+            if record.get("status") == "paused":
+                self.store.resume(job_id, "Stale runtime PID detected. Attempting partial resume.", resume_on_start=False)
+            self.store.set_runtime(
+                job_id,
+                process_id=None,
+                temp_file=runtime_temp_file,
                 log_file=str(record.get("log_file") or ""),
                 final_output_file=str(record.get("final_output_file") or ""),
                 resume_on_start=False,
