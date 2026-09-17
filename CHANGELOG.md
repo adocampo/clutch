@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.4] - 2026-09-17
+
+### Fixed in 2.6.4
+
+- **GPU hardware decoding for NVENC conversions**: added `--enable-hw-decoding nvdec` when HandBrake uses NVENC encoding. Without this, HEVC 2160p sources were decoded on CPU (consuming 6-8 cores) while NVENC sat idle. Now both decode (NVDEC) and encode (NVENC) run on GPU hardware, reducing CPU usage from ~800% to ~20% for 2160p HEVC content.
+
 ## [2.6.3] - 2026-09-17
 
 ### Fixed in 2.6.3
