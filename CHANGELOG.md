@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.2] - 2026-09-17
+
+### Fixed in 2.6.2
+
+- **ISO title selection crash**: `NameError: name 'display_titles' is not defined` when selecting titles from ISO images. The `display_titles` function was called in `service.py` but never imported from `clutch.iso`.
+
 ## [2.6.1] - 2026-08-24
 
 ### Fixed in 2.6.1
