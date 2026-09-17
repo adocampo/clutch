@@ -1808,6 +1808,9 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 preset_params = _build_software_fallback_preset(preset_params)
         from clutch.presets import build_handbrake_args
         hb_params += build_handbrake_args(preset_params, source_resolution=resolution)
+        # Enable NVDEC for GPU-accelerated decode when preset uses NVENC.
+        if nvenc_requested:
+            hb_params.extend(["--enable-hw-decoding", "nvdec"])
         # GPU pinning when the preset's video encoder is NVENC.
         video_cfg = preset_params.get("video") if isinstance(preset_params, dict) else {}
         encoder_name = str((video_cfg or {}).get("encoder") or "").lower()
@@ -1823,6 +1826,9 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
         elif encode_speed == "normal":
             if uses_nvenc_encoder(codec, encode_speed):
                 hb_params.extend(["--preset", "H.265 NVENC 2160p 4K"])
+                # Enable NVDEC for GPU-accelerated decode — without this HandBrake
+                # decodes HEVC 2160p on CPU which eats 6-8 cores while NVENC idles.
+                hb_params.extend(["--enable-hw-decoding", "nvdec"])
             elif normalized_codec.startswith("vce_") and uses_vce_encoder(codec, encode_speed):
                 hb_params.extend([
                     "-e", codec,
