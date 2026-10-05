@@ -512,7 +512,9 @@ def build_handbrake_args(preset: Dict[str, object], *, source_resolution: str = 
     if isinstance(video, dict):
         encoder = str(video.get("encoder") or "").strip()
         if encoder:
-            args.extend(["-e", encoder])
+            # Clutch codec names that differ from HandBrakeCLI encoder names.
+            hb_aliases = {"av1": "svt_av1", "av1_nvenc": "nvenc_av1", "av1_qsv": "qsv_av1"}
+            args.extend(["-e", hb_aliases.get(encoder.lower(), encoder)])
         quality_mode = str(video.get("quality_mode") or "crf").strip()
         quality_value = video.get("quality_value")
         try:

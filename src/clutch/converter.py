@@ -828,7 +828,8 @@ def _is_av1_nvenc_available() -> bool:
     except (FileNotFoundError, subprocess.SubprocessError):
         return False
     output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-    return "av1_nvenc" in output
+    # HandBrakeCLI lists the encoder as "nvenc_av1".
+    return "nvenc_av1" in output or "av1_nvenc" in output
 
 
 def _is_av1_vce_available() -> bool:
@@ -868,7 +869,7 @@ def resolve_av1_encoder() -> str:
             timeout=8,
         )
         output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-        if "av1_qsv" in output:
+        if "qsv_av1" in output or "av1_qsv" in output:
             return "av1_qsv"
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
@@ -938,15 +939,53 @@ def uses_vce_encoder(codec: str, encode_speed: str) -> bool:
     return False
 
 
+def is_nvenc_codec(codec: str) -> bool:
+    """Return whether a codec name refers to an NVIDIA NVENC encoder."""
+    return "nvenc" in str(codec or "").strip().lower()
+
+
 def uses_nvenc_encoder(codec: str, encode_speed: str) -> bool:
     """Return whether the current settings route the encode through NVENC."""
     normalized_speed = str(encode_speed or "").strip().lower()
-    normalized_codec = str(codec or "").strip().lower()
-    if normalized_speed == "normal":
-        return is_nvenc_available()
-    if normalized_speed == "fast":
-        return normalized_codec.startswith("nvenc_") and is_nvenc_available()
+    if normalized_speed in ("normal", "fast"):
+        return is_nvenc_codec(codec) and is_nvenc_available()
     return False
+
+
+# Clutch codec names that differ from HandBrakeCLI encoder names.
+_HANDBRAKE_ENCODER_ALIASES = {
+    "av1": "svt_av1",
+    "av1_nvenc": "nvenc_av1",
+    "av1_qsv": "qsv_av1",
+}
+
+
+def handbrake_encoder_name(codec: str) -> str:
+    """Translate a clutch codec name to the HandBrakeCLI ``-e`` encoder name."""
+    normalized = str(codec or "").strip().lower()
+    return _HANDBRAKE_ENCODER_ALIASES.get(normalized, normalized)
+
+
+def _software_codec_for(codec: str) -> str:
+    """Return the CPU encoder equivalent to ``codec`` (same video format)."""
+    normalized = str(codec or "").strip().lower()
+    if normalized in ("x264", "x264_10bit", "x265", "x265_10bit", "x265_12bit", "svt_av1", "svt_av1_10bit"):
+        return normalized
+    if "av1" in normalized:
+        return "svt_av1"
+    if "264" in normalized:
+        return "x264"
+    return "x265"
+
+
+def _software_base_preset_for(codec: str) -> str:
+    """Return the HandBrake software MKV preset matching the codec's video format."""
+    software = _software_codec_for(codec)
+    if "av1" in software:
+        return "AV1 MKV 2160p60 4K"
+    if "264" in software:
+        return "H.264 MKV 2160p60 4K"
+    return "H.265 MKV 2160p60 4K"
 
 
 def _preset_requests_nvenc(preset_params: Optional[dict]) -> bool:
@@ -954,7 +993,7 @@ def _preset_requests_nvenc(preset_params: Optional[dict]) -> bool:
         return False
     video_cfg = preset_params.get("video") if isinstance(preset_params.get("video"), dict) else {}
     encoder = str((video_cfg or {}).get("encoder") or "").strip().lower()
-    if encoder.startswith("nvenc_"):
+    if is_nvenc_codec(encoder):
         return True
     base = str(preset_params.get("handbrake_preset") or "").strip().lower()
     return "nvenc" in base
@@ -988,7 +1027,8 @@ def _build_software_fallback_preset(preset_params: Optional[dict]) -> Optional[d
     video_cfg = fallback.get("video")
     if isinstance(video_cfg, dict):
         encoder = str(video_cfg.get("encoder") or "").strip().lower()
-        if encoder.startswith("nvenc_") or encoder.startswith("vce_") or encoder.startswith("vaapi_") or encoder.startswith("vt_"):
+        if (is_nvenc_codec(encoder) or encoder.startswith("vce_") or encoder.startswith("vaapi_")
+                or encoder.startswith("vt_") or encoder.endswith("_qsv")):
             if "av1" in encoder:
                 video_cfg["encoder"] = "svt_av1"
             elif "265" in encoder or "hevc" in encoder:
@@ -1734,6 +1774,13 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             dir=output_subdir, prefix=f"{base_name}.tmp.{extension}.", delete=False
         ) as tf:
             temp_filepath = tf.name
+
+    # Get input size for compression estimation
+    try:
+        input_size_bytes = os.path.getsize(input_file)
+    except OSError:
+        input_size_bytes = 0
+
     _update_conversion_state(
         thread_id,
         temp_file=temp_filepath,
@@ -1808,27 +1855,38 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                 preset_params = _build_software_fallback_preset(preset_params)
         from clutch.presets import build_handbrake_args
         hb_params += build_handbrake_args(preset_params, source_resolution=resolution)
-        # Enable NVDEC for GPU-accelerated decode when preset uses NVENC.
-        if nvenc_requested:
-            hb_params.extend(["--enable-hw-decoding", "nvdec"])
-        # GPU pinning when the preset's video encoder is NVENC.
         video_cfg = preset_params.get("video") if isinstance(preset_params, dict) else {}
         encoder_name = str((video_cfg or {}).get("encoder") or "").lower()
         nvenc_requested = _preset_requests_nvenc(preset_params)
         vce_requested = _preset_requests_vce(preset_params)
-        if gpu_device is not None and encoder_name.startswith("nvenc_"):
+        # Enable NVDEC for GPU-accelerated decode when preset uses NVENC.
+        if nvenc_requested:
+            hb_params.extend(["--enable-hw-decoding", "nvdec"])
+        # GPU pinning when the preset's video encoder is NVENC.
+        if gpu_device is not None and is_nvenc_codec(encoder_name):
             hb_params.extend(["--encopts", f"gpu={int(gpu_device)}"])
     else:
         hb_params += audio_params
         normalized_codec = str(codec or "").strip().lower()
         if encode_speed == "slow":
-            hb_params.extend(["--preset", "H.265 MKV 2160p60 4K"])
+            # Slow mode always encodes on CPU, keeping the requested video format.
+            hb_params.extend(["--preset", _software_base_preset_for(normalized_codec)])
+            hb_params.extend(["-e", _software_codec_for(normalized_codec)])
         elif encode_speed == "normal":
             if uses_nvenc_encoder(codec, encode_speed):
-                hb_params.extend(["--preset", "H.265 NVENC 2160p 4K"])
+                if "av1" in normalized_codec:
+                    hb_params.extend(["--preset", "AV1 MKV 2160p60 4K", "-e", handbrake_encoder_name(normalized_codec)])
+                elif "264" in normalized_codec:
+                    hb_params.extend(["--preset", "H.265 NVENC 2160p 4K", "-e", "nvenc_h264"])
+                else:
+                    hb_params.extend(["--preset", "H.265 NVENC 2160p 4K"])
+                    if normalized_codec != "nvenc_h265":
+                        hb_params.extend(["-e", handbrake_encoder_name(normalized_codec)])
                 # Enable NVDEC for GPU-accelerated decode — without this HandBrake
                 # decodes HEVC 2160p on CPU which eats 6-8 cores while NVENC idles.
                 hb_params.extend(["--enable-hw-decoding", "nvdec"])
+            elif normalized_codec == "av1_qsv":
+                hb_params.extend(["--preset", "AV1 QSV 2160p 4K"])
             elif normalized_codec.startswith("vce_") and uses_vce_encoder(codec, encode_speed):
                 hb_params.extend([
                     "-e", codec,
@@ -1856,13 +1914,15 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     output_base_dir=output_base_dir, preset_params=preset_params,
                 )
             else:
-                warning("Hardware encoder is not available in this runtime. Falling back to software H.265 preset.")
-                hb_params.extend(["--preset", "H.265 MKV 2160p60 4K"])
+                software_codec = _software_codec_for(normalized_codec)
+                if software_codec != normalized_codec:
+                    warning(f"Hardware encoder '{codec}' is not available in this runtime. Falling back to software {software_codec}.")
+                hb_params.extend(["--preset", _software_base_preset_for(software_codec), "-e", software_codec])
         elif encode_speed == "fast":
-            selected_codec = codec
-            if normalized_codec.startswith("nvenc_") and not uses_nvenc_encoder(codec, encode_speed):
+            selected_codec = handbrake_encoder_name(codec)
+            if is_nvenc_codec(normalized_codec) and not uses_nvenc_encoder(codec, encode_speed):
                 warning("NVENC is not available in this runtime. Falling back to software encoder for fast mode.")
-                selected_codec = "x265" if "265" in normalized_codec else "x264"
+                selected_codec = _software_codec_for(normalized_codec)
             elif normalized_codec.startswith("vce_") and not uses_vce_encoder(codec, encode_speed):
                 if is_vaapi_fallback_available():
                     from clutch.ffmpeg_converter import convert_video_ffmpeg
@@ -1914,6 +1974,23 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             if clamped < last_progress:
                 return
             last_progress = clamped
+
+            # Estimate compression based on progress and current file size
+            try:
+                current_size = os.path.getsize(temp_filepath)
+                if clamped > 1.0 and input_size_bytes > 0:
+                    projected_final_size = (current_size * 100.0) / clamped
+                    # Ensure projected size isn't absurdly small due to early estimation
+                    if projected_final_size < 1:
+                         projected_final_size = current_size
+                    
+                    est_compression = (1 - (projected_final_size / input_size_bytes)) * 100
+                    # Clamp compression between 0 and 100
+                    est_compression = max(0.0, min(est_compression, 100.0))
+                    detail = f"{detail} (Compresión est.: {est_compression:.1f}%)"
+            except OSError:
+                pass
+
             if progress_callback is not None:
                 progress_callback(clamped, detail)
 
