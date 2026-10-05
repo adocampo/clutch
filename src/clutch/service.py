@@ -2211,10 +2211,23 @@ class ConversionService:
         last_logged_bucket = -1
         started_at = time.monotonic()
 
-        def callback(percent: float, _detail: str):
+        def callback(percent: float, detail: str = ""):
             nonlocal last_bucket, last_update_at, last_logged_bucket
-            bucket = int(percent)
             now = time.time()
+            if percent <= 0.0:
+                if now - last_update_at < 1.0:
+                    return
+                last_update_at = now
+                message = str(detail or "").strip() or "Scanning / Preparing…"
+                self.store.update_progress(
+                    job_id,
+                    0.0,
+                    message=message,
+                    output_size_bytes=get_current_conversion_output_size(),
+                )
+                return
+
+            bucket = int(percent)
             if bucket == last_bucket and now - last_update_at < 2.0 and percent < 100.0:
                 return
             last_bucket = bucket

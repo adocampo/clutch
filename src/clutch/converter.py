@@ -10,6 +10,7 @@ import threading
 import time
 import unicodedata
 import copy
+from collections import deque
 from typing import Callable, Optional
 
 if os.name != "nt":
@@ -2112,6 +2113,21 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             if emit_logs:
                 info(f"Converting: {os.path.basename(input_file)}")
             conversion_succeeded = False
+            recent_log_lines: deque[str] = deque(maxlen=5)
+            encoding_started = initial_progress > 0.0
+
+            def handle_line(line: str):
+                nonlocal encoding_started
+                percent = _extract_progress_percent(line)
+                if percent is not None:
+                    encoding_started = True
+                    report_progress(percent, line)
+                elif not encoding_started:
+                    clean = line.strip()
+                    if clean:
+                        recent_log_lines.append(clean)
+                        report_progress(0.0, "\n".join(recent_log_lines))
+
             if existing_process_id:
                 attach_conversion_runtime(
                     thread_id,
@@ -2143,10 +2159,7 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                         log_path,
                         process=process,
                         process_id=process.pid,
-                        line_handler=lambda line: (
-                            lambda percent: report_progress(percent, line)
-                            if percent is not None else None
-                        )(_extract_progress_percent(line)),
+                        line_handler=handle_line,
                         detach_when=should_detach if detach_when is not None else None,
                     )
                     process.wait()
@@ -2158,10 +2171,7 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     log_path,
                     process=None,
                     process_id=existing_process_id,
-                    line_handler=lambda line: (
-                        lambda percent: report_progress(percent, line)
-                        if percent is not None else None
-                    )(_extract_progress_percent(line)),
+                    line_handler=handle_line,
                     detach_when=should_detach if detach_when is not None else None,
                 )
                 conversion_succeeded = last_progress >= 99.9 and os.path.exists(temp_filepath)

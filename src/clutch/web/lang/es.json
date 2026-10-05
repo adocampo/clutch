@@ -734,6 +734,7 @@
 
   "job_progress.done": "Hecho",
   "job_progress.waiting": "Esperando",
+  "job_progress.scanning": "Escaneando…",
   "job_progress.cancelling": "Cancelando…",
   "job_progress.failed": "Fallido",
   "job_progress.cancelled": "Cancelado",

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.7] - 2026-10-05
+
+### Added in 2.6.7
+
+- **Live scan and pre-encoding log in job message**: instead of displaying `Encoding 0.0%` while HandBrake or ffmpeg is scanning titles, chapters, or streams (which can take minutes on large files like `.m2ts`), the job message now displays a live 5-line tail of the scanner log output.
+- **Scanning status in dashboard progress**: the activity table progress column now displays `Scanning…` (`Escaneando…`) instead of `0.0%` while a running job is still in the scan phase.
+- **Projected compression ratio during encoding**: the compression percentage shown in the dashboard for active and paused jobs is now computed from the projected final output size based on current progress percentage, rather than comparing the partial temporary file against the entire source file.
+
 ## [2.6.6] - 2026-10-05
 
 ### Added in 2.6.6

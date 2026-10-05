@@ -733,6 +733,7 @@
 
   "job_progress.done": "Done",
   "job_progress.waiting": "Waiting",
+  "job_progress.scanning": "Scanning…",
   "job_progress.cancelling": "Cancelling…",
   "job_progress.failed": "Failed",
   "job_progress.cancelled": "Cancelled",

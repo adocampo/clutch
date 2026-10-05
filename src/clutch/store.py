@@ -607,7 +607,14 @@ class JobStore:
         output_size_bytes = int(record.get("output_size_bytes") or 0)
         compression_percent = None
         if input_size_bytes > 0 and output_size_bytes > 0:
-            compression_percent = (1 - (output_size_bytes / input_size_bytes)) * 100
+            status = str(record.get("status") or "")
+            progress = float(record.get("progress_percent") or 0.0)
+            if status in ("running", "paused"):
+                if progress > 1.0:
+                    projected_size = (output_size_bytes * 100.0) / progress
+                    compression_percent = max(0.0, min(100.0, (1 - (projected_size / input_size_bytes)) * 100))
+            else:
+                compression_percent = max(0.0, min(100.0, (1 - (output_size_bytes / input_size_bytes)) * 100))
         record["input_size_bytes"] = input_size_bytes
         record["output_size_bytes"] = output_size_bytes
         record["compression_percent"] = compression_percent

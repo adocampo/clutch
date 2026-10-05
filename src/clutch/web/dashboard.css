@@ -1511,6 +1511,12 @@ button:disabled {
     flex-basis: 100%;
 }
 
+.jt-detail-message .job-detail-value {
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
 .job-detail {
     display: grid;
     gap: 4px;

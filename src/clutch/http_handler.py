@@ -1978,10 +1978,18 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
         last_update_at = 0.0
         started_at = _time.monotonic()
 
-        def _progress_callback(percent: float, _detail: str):
+        def _progress_callback(percent: float, detail: str = ""):
             nonlocal last_bucket, last_update_at
-            bucket = int(percent)
             now = _time.time()
+            if percent <= 0.0:
+                if now - last_update_at < 1.0:
+                    return
+                last_update_at = now
+                message = str(detail or "").strip() or "Scanning / Preparing…"
+                event_queue.put({"type": "progress", "percent": 0.0, "detail": message})
+                return
+
+            bucket = int(percent)
             if bucket == last_bucket and now - last_update_at < 2.0 and percent < 100.0:
                 return
             last_bucket = bucket

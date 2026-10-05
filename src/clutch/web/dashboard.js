@@ -2883,8 +2883,8 @@
             let progressLabel = i18n.t('job_progress.done');
 
             if (job.status === 'queued') progressLabel = i18n.t('job_progress.waiting');
-            else if (job.status === 'running') progressLabel = progress.toFixed(1) + '%';
-            else if (job.status === 'paused') progressLabel = progress.toFixed(1) + '%';
+            else if (job.status === 'running') progressLabel = progress > 0 ? progress.toFixed(1) + '%' : i18n.t('job_progress.scanning');
+            else if (job.status === 'paused') progressLabel = progress > 0 ? progress.toFixed(1) + '%' : i18n.t('job_progress.scanning');
             else if (job.status === 'cancelling') progressLabel = i18n.t('job_progress.cancelling');
             else if (job.status === 'failed') progressLabel = i18n.t('job_progress.failed');
             else if (job.status === 'cancelled') progressLabel = i18n.t('job_progress.cancelled');

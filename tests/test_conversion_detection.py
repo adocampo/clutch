@@ -396,7 +396,7 @@ class ConversionServicePauseResumeTests(unittest.TestCase):
 
             resumed = service.resume_job(record["id"])
 
-            self.assertEqual(resumed["status"], "running")
+            self.assertEqual(resumed["status"], "paused")
             self.assertTrue(bool(resumed["resume_on_start"]))
             self.assertIn("Waiting for a worker", resumed["message"])
             self.assertIn(record["id"], service._recoverable_job_ids)
@@ -512,6 +512,42 @@ class ConversionServicePauseResumeTests(unittest.TestCase):
             with patch("clutch.service.check_already_converted", return_value="convert"), \
                     patch("clutch.service.find_existing_converted_output", return_value=""):
                 self.assertTrue(service.should_ignore_watch_path(input_path))
+
+    def test_progress_callback_shows_scan_log_before_encoding(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "service.db")
+            input_path = os.path.join(temp_dir, "movie.m2ts")
+            with open(input_path, "w", encoding="utf-8") as handle:
+                handle.write("video content")
+
+            service = ConversionService(db_path)
+            record = service.submit_job(ConversionJob(input_file=input_path))
+            service.store.claim_next()
+
+            cb = service._build_progress_callback(record["id"])
+            scan_detail = "[scan] BD has 1 title(s)\n[scan] Scanning title 1 of 1..."
+            cb(0.0, scan_detail)
+
+            job = service.store.get(record["id"])
+            self.assertEqual(job["progress_percent"], 0.0)
+            self.assertEqual(job["message"], scan_detail)
+
+    def test_store_projected_compression_during_conversion(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "service.db")
+            input_path = os.path.join(temp_dir, "movie.mkv")
+            with open(input_path, "wb") as handle:
+                handle.write(b"0" * 1000)
+
+            service = ConversionService(db_path)
+            record = service.submit_job(ConversionJob(input_file=input_path))
+            service.store.claim_next()
+
+            # At 50% progress, output size is 200 bytes -> projected final is 400 bytes -> 60% compression
+            service.store.update_progress(record["id"], 50.0, message="Encoding 50.0%", output_size_bytes=200)
+
+            job = service.store.get(record["id"])
+            self.assertAlmostEqual(job["compression_percent"], 60.0, places=1)
 
 
 if __name__ == "__main__":

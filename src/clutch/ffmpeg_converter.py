@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from typing import Callable, Dict, List, Optional
 
 from clutch.output import debug, info, warning, error, success, skip
@@ -975,6 +976,8 @@ def convert_video_ffmpeg(
                     bar_format="{percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]",
                 )
 
+            recent_log_lines: deque[str] = deque(maxlen=5)
+            encoding_started = False
             try:
                 for line in _iter_ffmpeg_lines(process.stderr):
                     if _is_conversion_interrupted(thread_id):
@@ -996,6 +999,7 @@ def convert_video_ffmpeg(
 
                     pct = parse_ffmpeg_progress(line, duration)
                     if pct is not None:
+                        encoding_started = True
                         if pbar:
                             increment = pct - pbar.n
                             if increment > 0:
@@ -1005,6 +1009,9 @@ def convert_video_ffmpeg(
                         stripped = line.strip()
                         if stripped and not stripped.startswith("frame="):
                             error_lines.append(stripped)
+                            if not encoding_started and progress_callback is not None:
+                                recent_log_lines.append(stripped)
+                                report_progress(0.0, "\n".join(recent_log_lines))
 
                 process.wait()
                 conversion_succeeded = process.returncode == 0
