@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.6] - 2026-10-05
+
+### Added in 2.6.6
+
+- **`.m2ts` input support**: Blu-ray `.m2ts` files are now recognized as video inputs by the CLI, the service, the watchers and remote uploads.
+
 ## [2.6.5] - 2026-10-05
 
 ### Added in 2.6.5

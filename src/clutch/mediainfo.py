@@ -7,7 +7,7 @@ from typing import List
 from clutch import get_binary_path
 from clutch.output import info, warning, error, debug, skip
 
-VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso')
+VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.ts', '.m2ts', '.iso')
 
 # Codec quality hierarchy (higher = better compression)
 CODEC_QUALITY = {
