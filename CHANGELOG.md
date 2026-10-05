@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.5] - 2026-10-05
+
+### Added in 2.6.5
+
+- **Live estimated compression**: while a HandBrake conversion is running, the progress message now includes an estimated final compression (`Compresión est.: XX.X%`). It is computed by projecting the temporary output size to 100% from the current progress (`current_size / progress * 100`) and comparing it with the source size, instead of comparing the partial file with the full original.
+
+### Fixed in 2.6.5
+
+- **AV1 and QSV encoder detection**: HandBrakeCLI exposes these encoders as `nvenc_av1` and `qsv_av1`; detection now recognizes both naming forms so `av1_auto` resolves correctly.
+- **Clutch-to-HandBrake encoder names**: `av1`, `av1_nvenc` and `av1_qsv` are now translated to `svt_av1`, `nvenc_av1` and `qsv_av1` both in codec-based conversions and in preset-generated arguments.
+- **NVENC detection**: any codec containing `nvenc` (not only names starting with `nvenc_`) is now treated as NVENC, including AV1 NVENC, for NVDEC decoding, GPU pinning and software fallback.
+- **Software fallback keeps the video format**: slow mode and unavailable-hardware fallbacks now pick the CPU encoder and base preset matching the requested format (H.264, H.265 or AV1) instead of always falling back to H.265. QSV encoders are also replaced in software fallback presets.
+
 ## [2.6.4] - 2026-09-17
 
 ### Fixed in 2.6.4
