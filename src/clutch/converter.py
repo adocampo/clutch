@@ -95,6 +95,112 @@ def _set_failure_reason(reason: str):
         _last_failure_reason[tid] = reason
 
 
+# ── Helper functions for VA-API fallback ─────────────────────────────────────────
+
+_unknown_video_codec_error_cache: dict[str, bool] = {}
+
+def _is_unknown_video_codec_error(err_text: str) -> bool:
+    """Return True if the error indicates an unknown/unsupported video codec (e.g., Dolby Vision).
+
+    Detects the phrase regardless of which HW encoder is active (nvenc, qsv, vaapi,
+    x264, x265 — x265 is the most common because it does not support Dolby Vision).
+    Results are cached by hash for performance.
+    """
+    h = hash(err_text)
+    if h in _unknown_video_codec_error_cache:
+        return _unknown_video_codec_error_cache[h]
+    result = "unknown video codec" in err_text.lower() or \
+             "unsupported video codec" in err_text.lower() or \
+             "invalid video codec" in err_text.lower()
+    if len(_unknown_video_codec_error_cache) > 200:
+        _unknown_video_codec_error_cache.clear()
+    _unknown_video_codec_error_cache[h] = result
+    return result
+
+
+# Legacy aliases maintained for backward compatibility
+_is_unknown_video_codec_hw_error = _is_unknown_video_codec_error
+
+def _is_unknown_video_codec_nvenc_error(err_text: str) -> bool:
+    """Return True if the error mentions NVENC and an unknown codec.
+
+    Kept for backward compatibility — callers should use _is_unknown_video_codec_error.
+    """
+    return "nvenc" in err_text.lower() and _is_unknown_video_codec_error(err_text)
+
+
+def _is_unknown_video_codec_vce_error(err_text: str) -> bool:
+    """Return True if the error mentions VCE and an unknown codec.
+
+    Kept for backward compatibility — callers should use _is_unknown_video_codec_error.
+    """
+    return "vce" in err_text.lower() and _is_unknown_video_codec_error(err_text)
+
+
+def _has_vaapi_support(report_progress=None) -> bool:
+    """Return True when ffmpeg with VA-API HEVC is available for fallback."""
+    try:
+        from clutch.ffmpeg_converter import is_vaapi_available, is_vaapi_codec
+        return is_vaapi_available() and is_vaapi_codec("hevc")
+    except ImportError:
+        return False
+
+
+def _try_vaapi_conversion(
+    input_file: str,
+    temp_filepath: str,
+    output_file: str,
+    video_codec: str,
+    audio_codec: str,
+    audio_passthrough: bool,
+    title=None,
+    audio_tracks=None,
+    output_format: str = "mkv",
+    subtitle_args=None,
+    thread_id: int = 0,
+    progress_callback=None,
+    emit_logs: bool = False,
+    detach_when: str = "never",
+    output_base_dir: str = "",
+    runtime_callback=None,
+) -> str:
+    """Retry with ffmpeg VA-API after HandBrake failed with 'unknown video codec'."""
+    report_progress = progress_callback or (lambda **kw: None)
+
+    try:
+        from clutch.ffmpeg_converter import convert_video_ffmpeg
+    except ImportError:
+        debug("convert_video: ffmpeg fallback not available")
+        return ""
+
+    report_progress(0.0, "VA-API fallback — retrying …")
+
+    try:
+        return convert_video_ffmpeg(
+            input_file=input_file,
+            temp_filepath=temp_filepath,
+            output_file=output_file,
+            video_codec=video_codec,
+            audio_codec=audio_codec,
+            audio_passthrough=audio_passthrough,
+            output_format=output_format,
+            subtitle_args=subtitle_args or [],
+            thread_id=thread_id,
+            progress_callback=progress_callback,
+            emit_logs=emit_logs,
+            title=title,
+            audio_tracks=audio_tracks,
+            detach_when=detach_when,
+            output_base_dir=output_base_dir,
+            runtime_callback=runtime_callback,
+        )
+    except Exception as fallback_err:
+        debug(f"convert_video: VA-API fallback failed: {fallback_err}")
+        _set_failure_reason(f"VA-API fallback failed: {str(fallback_err)[:500]}")
+        report_progress(0.0, f"VA-API fallback failed: {str(fallback_err)[:200]}")
+        raise  # re-raise so the caller handles failure
+
+
 def _get_conversion_state(thread_id: Optional[int] = None) -> dict[str, object]:
     key = thread_id if thread_id is not None else threading.get_ident()
     with _conversion_state_lock:
@@ -1051,6 +1157,11 @@ def _is_unknown_video_codec_vce_error(hb_error_detail: str) -> bool:
     """Return whether the HandBrake error was caused by an unknown VCE codec."""
     detail = str(hb_error_detail or "").lower()
     return "unknown video codec" in detail and "vce" in detail
+
+
+def _is_unknown_video_codec_error(hb_error_detail: str) -> bool:
+    """Return whether the HandBrake error indicates an unknown/uncompatible video codec."""
+    return "unknown video codec" in str(hb_error_detail or "").lower()
 
 
 def _is_unknown_video_codec_hw_error(hb_error_detail: str) -> bool:
@@ -2366,6 +2477,29 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     preset_params=retry_preset_params,
                     allow_nvenc_retry=False,
                 )
+
+            # ── Fallback to VA-API (ffmpeg) after unknown video codec ──────────
+            if _is_unknown_video_codec_error(last_err) and _has_vaapi_support(report_progress):
+                debug(f"convert_video: unknown video codec after software fallback — trying vaapi_hevc")
+                _try_vaapi_conversion(
+                    input_file,
+                    temp_filepath,
+                    output_file,
+                    'vaapi_hevc',
+                    audio_codec,
+                    audio_passthrough,
+                    title=title,
+                    audio_tracks=audio_tracks,
+                    output_format=output_format,
+                    subtitle_args=subtitle_args,
+                    thread_id=thread_id,
+                    progress_callback=progress_callback,
+                    emit_logs=emit_logs,
+                    detach_when=detach_when,
+                    output_base_dir=output_base_dir,
+                    runtime_callback=runtime_callback,
+                )
+                return output_file  # returns on success or exits on failure
 
             _remove_temp_and_log(temp_filepath)
             _update_conversion_state(

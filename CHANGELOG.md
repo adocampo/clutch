@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.8] - 2026-10-09
+
+### Fixed in 2.6.8
+
+- **HandBrake fallback to ffmpeg VA-API for Dolby Vision**: when HandBrake fails with "unknown video codec" (exit code 3) on Dolby Vision or other unsupported sources — even after retrying with software encoders — and VA-API is available, clutch now retries with ffmpeg VA-API (`vaapi_hevc`) as a final fallback. ffmpeg's libavformat/libdav1d decoders handle Dolby Vision content better than x265, which does not support it.
+
 ## [2.6.7] - 2026-10-05
 
 ### Added in 2.6.7

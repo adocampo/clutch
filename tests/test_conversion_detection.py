@@ -550,5 +550,100 @@ class ConversionServicePauseResumeTests(unittest.TestCase):
             self.assertAlmostEqual(job["compression_percent"], 60.0, places=1)
 
 
+class UnknownVideoCodecErrorTests(unittest.TestCase):
+    """Test _is_unknown_video_codec_error detects Dolby Vision and similar failures."""
+
+    def test_is_unknown_video_codec_error_detects_nvenc(self):
+        from clutch.converter import _is_unknown_video_codec_error
+        self.assertTrue(
+            _is_unknown_video_codec_error(
+                "[09:47:19] x264 [info]: using cpu capabilities: MMX2 SSE2Fast SSSE3 "
+                "SSE4.2 AVX X86Shift — no AVX2 — AVX-512 unsupported — nvenc "
+                "unknown video codec",
+            )
+        )
+
+    def test_is_unknown_video_codec_error_detects_generic(self):
+        from clutch.converter import _is_unknown_video_codec_error
+        self.assertTrue(
+            _is_unknown_video_codec_error(
+                "[10:37:32] HandBrake has exited due to a video codec error: "
+                "unknown video codec",
+            )
+        )
+
+    def test_is_unknown_video_codec_error_detects_dolby_vision(self):
+        from clutch.converter import _is_unknown_video_codec_error
+        self.assertTrue(
+            _is_unknown_video_codec_error(
+                "[10:37:32] x265 [info]: SKKOSC1 Spider-Man Brand New Day (2026): "
+                "HEVC DV-HDR10 — skipping HDR tone mapping — unknown video codec",
+            )
+        )
+
+    def test_is_unknown_video_codec_error_returns_false_for_normal_errors(self):
+        from clutch.converter import _is_unknown_video_codec_error
+        self.assertFalse(
+            _is_unknown_video_codec_error(
+                "[10:37:00] x265 [info]: using cpu capabilities: MMX2 SSE2Fast "
+                "SSSE3 SSE4.2 AVX",
+            )
+        )
+
+    def test_is_unknown_video_codec_error_empty_string(self):
+        from clutch.converter import _is_unknown_video_codec_error
+        self.assertFalse(_is_unknown_video_codec_error(""))
+
+    def test_is_unknown_video_codec_hw_error_detects_nvenc(self):
+        from clutch.converter import _is_unknown_video_codec_hw_error
+        self.assertTrue(
+            _is_unknown_video_codec_hw_error(
+                "[10:37:32]: nvenc error: unknown video codec",
+            )
+        )
+
+    def test_is_unknown_video_codec_hw_error_detects_vce(self):
+        from clutch.converter import _is_unknown_video_codec_hw_error
+        self.assertTrue(
+            _is_unknown_video_codec_hw_error(
+                "[10:37:32]: VCE error: unknown video codec",
+            )
+        )
+
+    def test_is_unknown_video_codec_hw_error_returns_false_for_software_encoders(self):
+        from clutch.converter import _is_unknown_video_codec_hw_error
+        self.assertFalse(
+            _is_unknown_video_codec_hw_error(
+                "[10:37:32] x264 [info]: using cpu capabilities",
+            )
+        )
+
+    def test_is_unknown_video_codec_nvenc_error(self):
+        from clutch.converter import _is_unknown_video_codec_nvenc_error
+        self.assertTrue(
+            _is_unknown_video_codec_nvenc_error(
+                "[10:37:32] nvenc [error]: unknown video codec",
+            )
+        )
+        self.assertFalse(
+            _is_unknown_video_codec_nvenc_error(
+                "[10:37:32] x264 [info]: using cpu capabilities",
+            )
+        )
+
+    def test_is_unknown_video_codec_vce_error(self):
+        from clutch.converter import _is_unknown_video_codec_vce_error
+        self.assertTrue(
+            _is_unknown_video_codec_vce_error(
+                "[10:37:32] VCE [error]: unknown video codec",
+            )
+        )
+        self.assertFalse(
+            _is_unknown_video_codec_vce_error(
+                "[10:37:32] x264 [info]: using cpu capabilities",
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
