@@ -15,6 +15,10 @@ from clutch.converter import (
     find_existing_converted_output,
     _find_external_subtitles,
     _normalize_subtitle_language,
+    _is_unknown_video_codec_error,
+    _is_unknown_video_codec_hw_error,
+    _is_unknown_video_codec_nvenc_error,
+    _is_unknown_video_codec_vce_error,
 )
 from clutch.mediainfo import check_already_converted
 
@@ -548,6 +552,50 @@ class ConversionServicePauseResumeTests(unittest.TestCase):
 
             job = service.store.get(record["id"])
             self.assertAlmostEqual(job["compression_percent"], 60.0, places=1)
+
+
+class UnknownVideoCodecErrorTests(unittest.TestCase):
+    """Test the unknown video codec error detection helpers."""
+
+    def test_is_unknown_video_codec_error_detects_nvenc(self):
+        detail = "[14:46:26] hbutils: unknown video codec \"nvenc_h265\""
+        self.assertTrue(_is_unknown_video_codec_error(detail))
+
+    def test_is_unknown_video_codec_error_detects_generic(self):
+        detail = "encoder: x265 - Unknown video codec"
+        self.assertTrue(_is_unknown_video_codec_error(detail))
+
+    def test_is_unknown_video_codec_error_detects_dolby_vision(self):
+        detail = "[14:46:26]    + encoder: Opus (libopus) — Unknown video codec profile: dv_v6"
+        self.assertTrue(_is_unknown_video_codec_error(detail))
+
+    def test_is_unknown_video_codec_error_returns_false_for_normal_errors(self):
+        detail = "[14:46:26]    + encoder: x264 "
+        self.assertFalse(_is_unknown_video_codec_error(detail))
+
+    def test_is_unknown_video_codec_error_empty_string(self):
+        self.assertFalse(_is_unknown_video_codec_error(""))
+        self.assertFalse(_is_unknown_video_codec_error(None))
+
+    def test_is_unknown_video_codec_hw_error_detects_nvenc(self):
+        detail = "[14:46:26] hbutils: unknown video codec \"nvenc_h265\""
+        self.assertTrue(_is_unknown_video_codec_hw_error(detail))
+
+    def test_is_unknown_video_codec_hw_error_detects_vce(self):
+        detail = "[14:46:26] hbutils: unknown video codec \"vce_hevc\""
+        self.assertTrue(_is_unknown_video_codec_hw_error(detail))
+
+    def test_is_unknown_video_codec_hw_error_returns_false_for_software_encoders(self):
+        detail = "encoder: x265 - Unknown video codec"
+        self.assertFalse(_is_unknown_video_codec_hw_error(detail))
+
+    def test_is_unknown_video_codec_nvenc_error(self):
+        self.assertTrue(_is_unknown_video_codec_nvenc_error("unknown video codec nvenc h264"))
+        self.assertFalse(_is_unknown_video_codec_nvenc_error("unknown video codec x264"))
+
+    def test_is_unknown_video_codec_vce_error(self):
+        self.assertTrue(_is_unknown_video_codec_vce_error("unknown video codec vce_hevc"))
+        self.assertFalse(_is_unknown_video_codec_vce_error("unknown video codec x265"))
 
 
 if __name__ == "__main__":
