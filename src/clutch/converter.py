@@ -1053,11 +1053,6 @@ def _is_unknown_video_codec_vce_error(hb_error_detail: str) -> bool:
     return "unknown video codec" in detail and "vce" in detail
 
 
-def _is_unknown_video_codec_error(hb_error_detail: str) -> bool:
-    """Return whether the HandBrake error indicates an unknown/uncompatible video codec."""
-    return "unknown video codec" in str(hb_error_detail or "").lower()
-
-
 def _is_unknown_video_codec_hw_error(hb_error_detail: str) -> bool:
     """Return whether the HandBrake error was caused by an unknown HW codec."""
     return _is_unknown_video_codec_nvenc_error(hb_error_detail) or _is_unknown_video_codec_vce_error(hb_error_detail)
@@ -2370,48 +2365,6 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     resume_offset_seconds=resume_offset_seconds,
                     preset_params=retry_preset_params,
                     allow_nvenc_retry=False,
-                )
-
-            # Second fallback: HandBrake failed with "unknown video codec" even in software (e.g., Dolby Vision + HDR10 source).
-            # Try ffmpeg VA-API as a last resort — ffmpeg may handle the source differently.
-            should_retry_with_vaapi = (
-                not should_retry_with_software
-                and _is_unknown_video_codec_error(hb_error_detail)
-                and is_vaapi_available()
-            )
-
-            if should_retry_with_vaapi:
-                warning("HandBrake failed with unknown video codec. Retrying with ffmpeg VA-API backend.")
-                _remove_temp_and_log(temp_filepath)
-                _update_conversion_state(
-                    thread_id,
-                    temp_file=None,
-                    process=None,
-                    pid=None,
-                    interrupted=False,
-                    paused=False,
-                    paused_at=None,
-                    paused_seconds=0.0,
-                )
-                from clutch.ffmpeg_converter import convert_video_ffmpeg
-                return convert_video_ffmpeg(
-                    input_file=input_file,
-                    output_dir=output_dir,
-                    codec="vaapi_hevc",
-                    encode_speed=encode_speed,
-                    audio_passthrough=audio_passthrough,
-                    verbose=verbose,
-                    resolution_override=resolution_override,
-                    show_progress=show_progress,
-                    progress_callback=progress_callback,
-                    emit_logs=emit_logs,
-                    progress_log_path=progress_log_path,
-                    detach_when=detach_when,
-                    runtime_callback=runtime_callback,
-                    output_base_dir=output_base_dir,
-                    preset_params=preset_params,
-                    start_at_seconds=resume_offset_seconds,
-                    resume_partial_file=resume_partial_file,
                 )
 
             _remove_temp_and_log(temp_filepath)
