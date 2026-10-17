@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.9] - 2026-10-17
+
+### Fixed in 2.6.9
+
+- **Network shares (NAS/CIFS/NFS) read-only for the service**: the systemd unit no longer applies `ProtectSystem=strict`. That option remounts the whole filesystem read-only inside the service's mount namespace — including mount points outside `$HOME`, such as network shares — so writing converted files there failed with `[Errno 30] Read-only file system`. The complementary `ProtectHome=false` and `ReadWritePaths=` lines were removed as well; `NoNewPrivileges` and `PrivateTmp` are kept.
+
 ## [2.6.8] - 2026-10-09
 
 ### Fixed in 2.6.8
