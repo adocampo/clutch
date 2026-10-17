@@ -655,10 +655,7 @@ Restart=on-failure
 RestartSec=5
 Environment=HOME=%h
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=false
 PrivateTmp=true
-ReadWritePaths=%h/.local/state/clutch
 
 [Install]
 WantedBy=default.target
