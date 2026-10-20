@@ -14,11 +14,6 @@ from clutch.output import info, error
 
 _UPDATE_STATE_LOCK = threading.Lock()
 
-# Branch that hosts the "dev" channel. A dev build is a GitHub release whose
-# target_commitish points at this branch (e.g. tag v2.7.0.dev0).
-DEV_BRANCH = "releases-dev"
-VALID_CHANNELS = ("stable", "dev")
-
 
 def normalize_channel(channel: object) -> str:
     """Normalize a channel value to 'stable' or 'dev' (default 'stable')."""
@@ -28,9 +23,13 @@ def normalize_channel(channel: object) -> str:
 def _fetch_channel_release(channel: str) -> dict:
     """Return the GitHub release dict for the given channel, or {} on failure.
 
-    * stable* → the repository's latest non-prerelease release.
-    * dev* → the most recent release whose ``target_commitish`` is
-      :data:`DEV_BRANCH` (falling back to its tag name).
+    * stable* → the repository's latest non-prerelease release
+      (``/releases/latest`` excludes prereleases).
+    * dev* → the most recent **prerelease** release. Dev builds are
+      published as GitHub prereleases (e.g. ``v2.7.0.dev0``), so the
+      ``prerelease`` flag is the reliable channel marker. (``target_commitish``
+      is not usable: GitHub sets it to the default branch regardless of the
+      branch the tag actually points at.)
     """
     headers = {"Accept": "application/vnd.github+json"}
     if channel == "dev":
@@ -39,7 +38,7 @@ def _fetch_channel_release(channel: str) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             releases = json.loads(resp.read().decode())
         for rel in releases:
-            if rel.get("target_commitish") == DEV_BRANCH:
+            if rel.get("prerelease"):
                 return rel
         return {}
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
