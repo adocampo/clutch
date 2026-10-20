@@ -606,7 +606,11 @@ class ConversionService:
                 "In-app upgrades are not supported in Docker. "
                 "Pull the new image and recreate the container."
             )
-        update_info = self.get_update_info(force_check=False)
+        # Always do a LIVE check before installing. The cached state may point
+        # at a version that no longer exists on GitHub (e.g. a release that was
+        # re-published under a new tag), which would make the install fail. A
+        # fresh fetch guarantees we resolve the current channel's real version.
+        update_info = self.get_update_info(force_check=True)
         remote_version = str(update_info.get("remote_version") or "")
         local_version = str(update_info.get("local_version") or get_version())
         if not remote_version:
