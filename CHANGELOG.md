@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0.dev1] - 2026-10-20
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
+
+### Fixed in 2.7.0.dev1
+
+- **Dev-channel detection**: the updater now identifies the dev release by its GitHub *prerelease* flag instead of `target_commitish` (which GitHub sets to the default branch regardless of the tag's actual branch, so the dev release was never found). Switching to the dev channel now works.
+
 ## [2.7.0.dev0] - 2026-10-20
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.
