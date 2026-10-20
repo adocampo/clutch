@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.11] - 2026-10-20
+
+### Fixed in 2.6.11
+
+- **Dev-channel detection**: the updater now identifies the dev release by its GitHub *prerelease* flag instead of `target_commitish` (which GitHub sets to the default branch regardless of the tag's actual branch, so the dev release was never found). Switching to the dev channel now works.
+
 ## [2.6.10] - 2026-10-20
 
 ### Added in 2.6.10
