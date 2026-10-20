@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0.dev2] - 2026-10-20
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
+
+### Fixed in 2.7.0.dev2
+
+- **SVT-AV1 progress parsing**: SVT-AV1 uses `encoding: task X of Y, Z.ZZ %` (lowercase, comma before percentage) instead of HandBrake's `Encoding: Z.ZZ %`. The old regex only matched the HandBrake format, so the progress callback never fired and the dashboard stayed stuck at "EN EJECUCIÓN" with no size or compression info. Now both formats are recognized.
+
 ## [2.7.0.dev1] - 2026-10-20
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.
