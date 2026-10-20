@@ -848,6 +848,8 @@ def main():
                             help="Check if a newer version is available on GitHub.")
     info_group.add_argument("--upgrade", action="store_true",
                             help="Upgrade to the latest version from GitHub.")
+    info_group.add_argument("--channel", choices=["stable", "dev"], default="stable",
+                            help="Update channel to check/upgrade against (default: stable).")
     info_group.add_argument("--install-service", action="store_true",
                             help="Install the systemd user unit file for running clutch as a background service (Linux only).")
 
@@ -864,7 +866,8 @@ def main():
 
     # Handle --update / --upgrade before dependency checks
     if args.update:
-        local_ver, remote_ver, update_available = check_for_updates()
+        local_ver, remote_ver, update_available = check_for_updates(channel=args.channel)
+        print(f"  Channel         : {args.channel}")
         print(f"  Current version : {local_ver}")
         if remote_ver:
             print(f"  Latest version  : {remote_ver}")
@@ -874,13 +877,13 @@ def main():
                     print()
                     print(changelog)
                     print()
-                print(f"  Run '{APP_NAME} --upgrade' to install the new version.")
+                print(f"  Run '{APP_NAME} --upgrade --channel {args.channel}' to install the new version.")
             else:
                 info("Already up to date.")
         sys.exit(0)
 
     if args.upgrade:
-        upgrade()
+        upgrade(channel=args.channel, force=True)
         sys.exit(0)
 
     if args.install_service:

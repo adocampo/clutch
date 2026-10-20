@@ -1308,6 +1308,22 @@ class ServiceRequestHandler(BaseHTTPRequestHandler):
             self._send_json(202, payload)
             return
 
+        if path == "/updates/channel":
+            user = self._require_role("admin")
+            if not user:
+                return
+            try:
+                payload = self._read_json()
+            except json.JSONDecodeError:
+                payload = {}
+            channel = str((payload or {}).get("channel") or "").strip()
+            if channel not in ("stable", "dev"):
+                self._send_json(400, {"error": "channel must be 'stable' or 'dev'."})
+                return
+            stored = self.server.service.set_update_channel(channel)
+            self._send_json(200, {"ok": True, "update_channel": stored})
+            return
+
         if path == "/debug/fake-upgrade":
             user = self._require_role("admin")
             if not user:

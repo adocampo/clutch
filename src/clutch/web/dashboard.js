@@ -141,6 +141,7 @@
     const themeSelect = document.getElementById('theme-select');
     const releaseButton = document.getElementById('release-check');
     const releaseLabel = document.getElementById('release-label');
+    const updateChannelSelect = document.getElementById('update-channel');
     const aboutVersion = document.getElementById('about-version');
     const aboutEnvironment = document.getElementById('about-environment');
     const changelogRow = document.getElementById('changelog-row');
@@ -805,6 +806,7 @@
             update_step_total: Number(updateInfo.update_step_total) || 5,
             update_step_label: String(updateInfo.update_step_label || ''),
             runtime_environment: String(updateInfo.runtime_environment || ''),
+            update_channel: String(updateInfo.update_channel || state.release.update_channel || 'stable'),
         };
 
         // If local matches remote, the update is done — treat as no-update
@@ -813,6 +815,11 @@
         }
 
         state.release = nextInfo;
+
+        // Update channel selector
+        if (updateChannelSelect && updateChannelSelect.value !== nextInfo.update_channel) {
+            updateChannelSelect.value = nextInfo.update_channel;
+        }
 
         // Version display
         if (aboutVersion) {
@@ -5635,6 +5642,69 @@
             }
         }
     });
+
+    if (updateChannelSelect) {
+        updateChannelSelect.addEventListener('change', async function () {
+            const channel = updateChannelSelect.value;
+            try {
+                await fetchJson('/updates/channel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel: channel }),
+                });
+                state.release.update_channel = channel;
+                // Re-check against the newly selected channel.
+                const payload = await fetchJson('/updates/check', { method: 'POST' });
+                renderReleaseControl(payload);
+
+                const local = String(payload.local_version || '');
+                const remote = String(payload.remote_version || '');
+                // Offer to install the selected channel's version in BOTH
+                // directions (upgrade stable→dev, or rollback dev→stable).
+                if (remote && local && remote !== local) {
+                    const isDocker = payload.runtime_environment &&
+                        String(payload.runtime_environment).toLowerCase().indexOf('docker') !== -1;
+                    if (isDocker) {
+                        await showAlert({
+                            title: i18n.t('release.docker_upgrade_title'),
+                            message: i18n.t('release.docker_upgrade_message', { version: remote }),
+                            ok: i18n.t('release.docker_upgrade_ok'),
+                        });
+                        return;
+                    }
+                    const confirmed = await showConfirm({
+                        title: i18n.t('confirm.switch_channel_title', { channel: channel }),
+                        message: i18n.t('confirm.switch_channel_message', { local: local, remote: remote }),
+                        ok: i18n.t('confirm.switch_channel_ok'),
+                    });
+                    if (!confirmed) {
+                        return;
+                    }
+                    releaseButton.disabled = true;
+                    releaseButton.dataset.busy = 'true';
+                    try {
+                        const up = await fetchJson('/updates/upgrade', { method: 'POST' });
+                        renderReleaseControl(up.update_info || payload);
+                        showToast(up.message || i18n.t('toast.installing_update', { version: remote }), 'ok', 0);
+                        waitForReleaseRestart(remote);
+                    } catch (error) {
+                        renderReleaseControl(payload);
+                        showToast(error.message, 'error');
+                    } finally {
+                        if (!state.release.update_in_progress) {
+                            releaseButton.disabled = false;
+                            releaseButton.dataset.busy = 'false';
+                        }
+                    }
+                } else {
+                    showToast(i18n.t('toast.channel_changed', { channel: channel }), 'ok');
+                }
+            } catch (error) {
+                updateChannelSelect.value = state.release.update_channel || 'stable';
+                showToast(error.message, 'error');
+            }
+        });
+    }
 
     toggleAutoRefreshButton.addEventListener('click', function () {
         state.autoRefresh = !state.autoRefresh;
