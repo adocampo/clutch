@@ -340,6 +340,10 @@ class JobStore:
                 self._conn.execute(
                     "ALTER TABLE service_config ADD COLUMN display_timezone TEXT NOT NULL DEFAULT ''"
                 )
+            if "update_channel" not in service_config_columns:
+                self._conn.execute(
+                    "ALTER TABLE service_config ADD COLUMN update_channel TEXT NOT NULL DEFAULT 'stable'"
+                )
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS watchers (
@@ -659,7 +663,7 @@ class JobStore:
     def load_service_config(self) -> Optional[Dict[str, object]]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT allowed_roots_json, default_job_settings_json, worker_count, gpu_devices_json, schedule_config_json, log_level, log_retention_days, default_date_format, listen_port, binary_paths_json, upload_dir, max_upload_size_bytes, display_timezone FROM service_config WHERE singleton = 1"
+                "SELECT allowed_roots_json, default_job_settings_json, worker_count, gpu_devices_json, schedule_config_json, log_level, log_retention_days, default_date_format, listen_port, binary_paths_json, upload_dir, max_upload_size_bytes, display_timezone, update_channel FROM service_config WHERE singleton = 1"
             ).fetchone()
         if not row:
             return None
@@ -697,6 +701,7 @@ class JobStore:
             "upload_dir": str(row["upload_dir"] or ""),
             "max_upload_size_bytes": int(row["max_upload_size_bytes"] or 0),
             "display_timezone": str(row["display_timezone"] or ""),
+            "update_channel": str(row["update_channel"] or "stable"),
         }
 
     def save_service_config(
@@ -714,12 +719,13 @@ class JobStore:
         upload_dir: str = "",
         max_upload_size_bytes: int = 0,
         display_timezone: str = "",
+        update_channel: str = "stable",
     ):
         with self._lock, self._conn:
             self._conn.execute(
                 """
-                INSERT INTO service_config (singleton, allowed_roots_json, default_job_settings_json, worker_count, gpu_devices_json, schedule_config_json, log_level, log_retention_days, default_date_format, listen_port, binary_paths_json, upload_dir, max_upload_size_bytes, display_timezone)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO service_config (singleton, allowed_roots_json, default_job_settings_json, worker_count, gpu_devices_json, schedule_config_json, log_level, log_retention_days, default_date_format, listen_port, binary_paths_json, upload_dir, max_upload_size_bytes, display_timezone, update_channel)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(singleton) DO UPDATE SET
                     allowed_roots_json = excluded.allowed_roots_json,
                     default_job_settings_json = excluded.default_job_settings_json,
@@ -733,7 +739,8 @@ class JobStore:
                     binary_paths_json = excluded.binary_paths_json,
                     upload_dir = excluded.upload_dir,
                     max_upload_size_bytes = excluded.max_upload_size_bytes,
-                    display_timezone = excluded.display_timezone
+                    display_timezone = excluded.display_timezone,
+                    update_channel = excluded.update_channel
                 """,
                 (
                     json.dumps(list(allowed_roots)),
@@ -749,8 +756,34 @@ class JobStore:
                     str(upload_dir),
                     int(max_upload_size_bytes),
                     str(display_timezone),
+                    str(update_channel),
                 ),
             )
+
+    def set_update_channel(self, channel: str) -> str:
+        """Persist the update channel ('stable' or 'dev') and return the stored value.
+
+        Unknown values are normalized to 'stable' so a bad payload can never
+        leave the config in an unusable state.
+        """
+        normalized = "dev" if str(channel or "").strip().lower() == "dev" else "stable"
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE service_config SET update_channel = ? WHERE singleton = 1",
+                (normalized,),
+            )
+        return normalized
+
+    def get_update_channel(self) -> str:
+        """Return the configured update channel ('stable' or 'dev')."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT update_channel FROM service_config WHERE singleton = 1"
+            ).fetchone()
+        if not row:
+            return "stable"
+        value = str(row["update_channel"] or "stable").strip().lower()
+        return "dev" if value == "dev" else "stable"
 
     def list_watcher_configs(self) -> List[Dict[str, object]]:
         with self._lock:

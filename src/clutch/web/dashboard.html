@@ -2305,6 +2305,12 @@
                         <label class="field-row-label" data-i18n="system.about.updates_label">Updates</label>
                         <div class="field-row-control">
                             <div class="update-row">
+                                <select id="update-channel" class="update-channel-select"
+                                    aria-label="Update channel"
+                                    data-i18n-title="system.about.channel_title" title="Update channel">
+                                    <option value="stable" data-i18n="system.about.channel_stable">Stable</option>
+                                    <option value="dev" data-i18n="system.about.channel_dev">Dev</option>
+                                </select>
                                 <button class="secondary" type="button" id="release-check"
                                     aria-label="Check for new versions"
                                     data-i18n-title="system.about.check_updates_title" title="Check for new versions">

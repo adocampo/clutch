@@ -14,6 +14,39 @@ from clutch.output import info, error
 
 _UPDATE_STATE_LOCK = threading.Lock()
 
+# Branch that hosts the "dev" channel. A dev build is a GitHub release whose
+# target_commitish points at this branch (e.g. tag v2.7.0.dev0).
+DEV_BRANCH = "releases-dev"
+VALID_CHANNELS = ("stable", "dev")
+
+
+def normalize_channel(channel: object) -> str:
+    """Normalize a channel value to 'stable' or 'dev' (default 'stable')."""
+    return "dev" if str(channel or "").strip().lower() == "dev" else "stable"
+
+
+def _fetch_channel_release(channel: str) -> dict:
+    """Return the GitHub release dict for the given channel, or {} on failure.
+
+    * stable* → the repository's latest non-prerelease release.
+    * dev* → the most recent release whose ``target_commitish`` is
+      :data:`DEV_BRANCH` (falling back to its tag name).
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if channel == "dev":
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            releases = json.loads(resp.read().decode())
+        for rel in releases:
+            if rel.get("target_commitish") == DEV_BRANCH:
+                return rel
+        return {}
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())
+
 
 def is_running_in_docker() -> bool:
     """Return True if running inside a Docker container."""
@@ -32,9 +65,14 @@ def get_runtime_environment() -> str:
     return "Python"
 
 
-def build_update_state_path() -> str:
-    """Return the shared state file used to cache update checks."""
-    return os.path.join(build_state_dir(), "update-state.json")
+def build_update_state_path(channel: str = "stable") -> str:
+    """Return the state file used to cache update checks, keyed by channel.
+
+    Caching per channel prevents a stale *stable* result from being served
+    after the user switches to *dev* (or vice versa).
+    """
+    channel = normalize_channel(channel)
+    return os.path.join(build_state_dir(), f"update-state-{channel}.json")
 
 
 def _local_today() -> str:
@@ -90,8 +128,8 @@ def _normalize_update_state(raw_state: object, local_version: str | None = None)
     return state
 
 
-def _read_update_state_unlocked() -> dict[str, object]:
-    path = build_update_state_path()
+def _read_update_state_unlocked(channel: str = "stable") -> dict[str, object]:
+    path = build_update_state_path(channel)
     try:
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -100,8 +138,8 @@ def _read_update_state_unlocked() -> dict[str, object]:
     return _normalize_update_state(payload)
 
 
-def _write_update_state_unlocked(state: dict[str, object]) -> dict[str, object]:
-    path = build_update_state_path()
+def _write_update_state_unlocked(state: dict[str, object], channel: str = "stable") -> dict[str, object]:
+    path = build_update_state_path(channel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     normalized = _normalize_update_state(state, str(state.get("local_version") or get_version()))
     temp_path = f"{path}.tmp"
@@ -111,36 +149,32 @@ def _write_update_state_unlocked(state: dict[str, object]) -> dict[str, object]:
     return normalized
 
 
-def load_update_state() -> dict[str, object]:
-    """Load the cached update state, normalizing it for the current version."""
+def load_update_state(channel: str = "stable") -> dict[str, object]:
+    """Load the cached update state for *channel*, normalizing for the current version."""
     with _UPDATE_STATE_LOCK:
-        return _read_update_state_unlocked()
+        return _read_update_state_unlocked(channel)
 
 
 def _parse_version_tuple(version: str) -> tuple:
     """Convert a version string into a comparable tuple.
 
     Supports PEP 440 pre-release markers: ``2.0.0a1``, ``2.0.0b2``,
-    ``2.0.0rc1``.  The returned tuple compares correctly:
-    ``1.8.16 < 2.0.0a1 < 2.0.0b1 < 2.0.0rc1 < 2.0.0``.
+    ``2.0.0rc1`` and dev builds ``2.7.0.dev0``.  The returned tuple compares
+    correctly: ``2.6.10 < 2.7.0.dev0 < 2.7.0a1 < 2.7.0b1 < 2.7.0rc1 < 2.7.0``.
     """
-    _PRE_ORDER = {"a": -3, "b": -2, "rc": -1}
-    try:
-        parts = version.split(".")
-        nums: list[int] = []
-        pre_kind = 0  # 0 = final release (sorts highest)
-        pre_num = 0
-        for part in parts:
-            m = re.match(r"^(\d+)(a|b|rc)(\d+)$", part)
-            if m:
-                nums.append(int(m.group(1)))
-                pre_kind = _PRE_ORDER[m.group(2)]
-                pre_num = int(m.group(3))
-            else:
-                nums.append(int(part))
-        return (*nums, pre_kind, pre_num)
-    except (ValueError, AttributeError):
+    _PRE_ORDER = {"dev": -4, "a": -3, "b": -2, "rc": -1}
+    m = re.match(
+        r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[.\-]?(dev|a|b|rc)(\d+))?$",
+        str(version or "").strip(),
+    )
+    if not m:
         return (0,)
+    major = int(m.group(1))
+    minor = int(m.group(2) or 0)
+    patch = int(m.group(3) or 0)
+    pre_kind = _PRE_ORDER.get(m.group(4), 0) if m.group(4) else 0
+    pre_num = int(m.group(5)) if m.group(5) else 0
+    return (major, minor, patch, pre_kind, pre_num)
 
 
 def _fetch_remote_changelog() -> str:
@@ -194,23 +228,24 @@ def extract_changelog_between(changelog: str, current_ver: str, latest_ver: str)
     return "\n\n".join(result_parts)
 
 
-def check_for_updates(*, quiet: bool = False) -> tuple[str, str | None, bool]:
-    """Query GitHub for the latest release and compare with the local version."""
+def check_for_updates(*, channel: str = "stable", quiet: bool = False) -> tuple[str, str | None, bool]:
+    """Query GitHub for the latest release on *channel* and compare with local.
+
+    Returns ``(local_version, remote_version_or_None, update_available)``.
+    """
     local_ver = get_version()
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    channel = normalize_channel(channel)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
+        data = _fetch_channel_release(channel)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
         if not quiet:
             error(f"Could not reach GitHub: {exc}")
         return local_ver, None, False
 
-    remote_ver = data.get("tag_name", "").lstrip("v")
+    remote_ver = (data.get("tag_name") or "").lstrip("v")
     if not remote_ver:
         if not quiet:
-            error("Could not determine the latest remote version.")
+            error(f"Could not determine the latest {channel} version.")
         return local_ver, None, False
 
     update_available = _parse_version_tuple(remote_ver) > _parse_version_tuple(local_ver)
@@ -233,14 +268,15 @@ def _checked_recently(state: dict[str, object]) -> bool:
     return age < _UPDATE_STALE_SECONDS
 
 
-def get_update_state(*, force: bool = False, quiet: bool = False) -> dict[str, object]:
-    """Return cached release info, refreshing if the cache is stale."""
+def get_update_state(*, channel: str = "stable", force: bool = False, quiet: bool = False) -> dict[str, object]:
+    """Return cached release info for *channel*, refreshing if the cache is stale."""
+    channel = normalize_channel(channel)
     with _UPDATE_STATE_LOCK:
-        cached_state = _read_update_state_unlocked()
+        cached_state = _read_update_state_unlocked(channel)
         if not force and _checked_recently(cached_state):
             return cached_state
 
-        local_ver, remote_ver, update_available = check_for_updates(quiet=quiet)
+        local_ver, remote_ver, update_available = check_for_updates(channel=channel, quiet=quiet)
         next_state = _normalize_update_state(cached_state, local_ver)
         next_state["checked_at"] = _utc_now()
         next_state["checked_date"] = _local_today()
@@ -248,16 +284,16 @@ def get_update_state(*, force: bool = False, quiet: bool = False) -> dict[str, o
 
         if remote_ver is None:
             next_state["last_error"] = "Could not reach GitHub."
-            return _write_update_state_unlocked(next_state)
+            return _write_update_state_unlocked(next_state, channel)
 
         next_state["remote_version"] = remote_ver
         next_state["update_available"] = update_available
         next_state["changelog"] = get_update_changelog(local_ver, remote_ver) if update_available else ""
         next_state["last_error"] = ""
-        return _write_update_state_unlocked(next_state)
+        return _write_update_state_unlocked(next_state, channel)
 
 
-def mark_update_installed(installed_version: str | None = None) -> dict[str, object]:
+def mark_update_installed(installed_version: str | None = None, channel: str = "stable") -> dict[str, object]:
     """Persist that the current version is installed and no update badge is needed."""
     local_ver = installed_version or get_version()
     state = _default_update_state(local_ver)
@@ -266,15 +302,15 @@ def mark_update_installed(installed_version: str | None = None) -> dict[str, obj
     state["cli_notice_date"] = ""
     state["remote_version"] = local_ver
     with _UPDATE_STATE_LOCK:
-        return _write_update_state_unlocked(state)
+        return _write_update_state_unlocked(state, channel)
 
 
-def mark_cli_notice_shown() -> dict[str, object]:
+def mark_cli_notice_shown(channel: str = "stable") -> dict[str, object]:
     """Persist that the daily CLI update hint has already been displayed."""
     with _UPDATE_STATE_LOCK:
-        state = _read_update_state_unlocked()
+        state = _read_update_state_unlocked(channel)
         state["cli_notice_date"] = _local_today()
-        return _write_update_state_unlocked(state)
+        return _write_update_state_unlocked(state, channel)
 
 
 def _pipx_package_installed(package_name: str) -> bool:
@@ -472,18 +508,30 @@ def get_update_changelog(current_ver: str, latest_ver: str) -> str:
     return extract_changelog_between(changelog, current_ver, latest_ver)
 
 
-def upgrade():
-    """Upgrade clutch to the latest version via pipx."""
-    local_ver, remote_ver, update_available = check_for_updates()
+def upgrade(*, channel: str = "stable", force: bool = False):
+    """Upgrade clutch to the latest version on *channel* via pipx.
+
+    When *force* is True the target version is installed even if it is not
+    newer than the local one — this is what makes channel switching (and
+    therefore rollback) possible, e.g. dev 2.7.0.dev0 → stable 2.6.10.
+    """
+    channel = normalize_channel(channel)
+    local_ver, remote_ver, update_available = check_for_updates(channel=channel)
     if remote_ver is None:
         sys.exit(1)
 
+    print(f"  Channel         : {channel}")
     print(f"  Current version : {local_ver}")
     print(f"  Latest version  : {remote_ver}")
 
-    if not update_available:
+    if not update_available and not force:
         info("Already up to date.")
-        mark_update_installed(local_ver)
+        mark_update_installed(local_ver, channel)
+        sys.exit(0)
+
+    if remote_ver == local_ver:
+        info(f"Already on {remote_ver} ({channel}).")
+        mark_update_installed(local_ver, channel)
         sys.exit(0)
 
     if is_running_in_docker():
@@ -491,7 +539,7 @@ def upgrade():
         source = _build_install_source(remote_ver)
         result = _pip_upgrade_in_place(source, on_progress=lambda line: print(f"  {line}"))
         if result.returncode == 0:
-            mark_update_installed(remote_ver)
+            mark_update_installed(remote_ver, channel)
             info(f"Upgraded to {remote_ver} (active until container restart).")
             info("To make this permanent, update your Docker image:")
             info("  docker compose pull   (if using ghcr.io)")
@@ -518,7 +566,7 @@ def upgrade():
         )
 
     if result.returncode == 0:
-        mark_update_installed(remote_ver)
+        mark_update_installed(remote_ver, channel)
         info(f"Successfully upgraded to {remote_ver}.")
     else:
         if result.stdout:

@@ -67,7 +67,7 @@ from clutch.store import (
     set_configured_timezone,
     utc_now,
 )
-from clutch.updater import get_update_state, get_runtime_environment, is_running_in_docker, install_latest_version, mark_update_installed, _build_install_source, _windows_deferred_install
+from clutch.updater import get_update_state, get_runtime_environment, is_running_in_docker, install_latest_version, mark_update_installed, normalize_channel, _build_install_source, _windows_deferred_install
 from clutch.watcher import DirectoryWatcher, WorkerHandle
 
 # Re-export for backward compatibility
@@ -158,6 +158,7 @@ class ConversionService:
             self.listen_port = 8765
             self.upload_dir = ""
             self.max_upload_size_bytes = 0
+            self.update_channel = "stable"
             schedule_cfg = ScheduleConfig.from_dict(initial_schedule_config)
             self.scheduler.update_config(schedule_cfg)
             # Auto-detect binaries on first run
@@ -198,6 +199,7 @@ class ConversionService:
             self.listen_port = int(persisted_config.get("listen_port") or 8765)
             self.upload_dir = str(persisted_config.get("upload_dir") or "")
             self.max_upload_size_bytes = int(persisted_config.get("max_upload_size_bytes") or 0)
+            self.update_channel = normalize_channel(persisted_config.get("update_channel") or "stable")
             schedule_raw = persisted_config.get("schedule_config") or {}
             self.scheduler.update_config(ScheduleConfig.from_dict(schedule_raw))
             # Merge: auto-detect first, then overlay user-configured paths
@@ -572,7 +574,7 @@ class ConversionService:
         shutdown_callback()
 
     def get_update_info(self, *, force_check: bool = False) -> Dict[str, object]:
-        state = get_update_state(force=force_check, quiet=True)
+        state = get_update_state(channel=self.update_channel, force=force_check, quiet=True)
         return {
             "local_version": str(state.get("local_version") or get_version()),
             "remote_version": str(state.get("remote_version") or ""),
@@ -585,7 +587,18 @@ class ConversionService:
             "update_step_total": self._upgrade_step_total,
             "update_step_label": self._upgrade_step_label,
             "runtime_environment": get_runtime_environment(),
+            "update_channel": self.update_channel,
         }
+
+    def get_update_channel(self) -> str:
+        """Return the configured update channel ('stable' or 'dev')."""
+        return self.update_channel
+
+    def set_update_channel(self, channel: str) -> str:
+        """Persist and apply a new update channel, returning the stored value."""
+        normalized = self.store.set_update_channel(channel)
+        self.update_channel = normalized
+        return normalized
 
     def schedule_self_upgrade(self, shutdown_callback: Callable[[], None]) -> Dict[str, object]:
         if is_running_in_docker():
@@ -595,8 +608,13 @@ class ConversionService:
             )
         update_info = self.get_update_info(force_check=False)
         remote_version = str(update_info.get("remote_version") or "")
-        if not update_info.get("update_available"):
-            raise ValueError("No newer version is available.")
+        local_version = str(update_info.get("local_version") or get_version())
+        if not remote_version:
+            raise ValueError("No version is available on the current channel.")
+        if remote_version == local_version:
+            raise ValueError(f"Already on {remote_version} ({self.update_channel}).")
+        # Allow both upgrades and downgrades: switching channel (e.g. dev →
+        # stable) intentionally installs a different — possibly older — version.
 
         with self._update_lock:
             if self._upgrade_in_progress:
@@ -679,7 +697,7 @@ class ConversionService:
                     raise RuntimeError("Upgrade failed. Check the service logs for details.")
 
                 self._set_upgrade_step(5, "Verifying installation…")
-                mark_update_installed(target_version or get_version())
+                mark_update_installed(target_version or get_version(), self.update_channel)
 
             self._set_upgrade_step(6, "Install complete")
             import time as _time
@@ -1301,6 +1319,7 @@ class ConversionService:
             self.upload_dir,
             self.max_upload_size_bytes,
             self.display_timezone,
+            self.update_channel,
         )
         if worker_count_changed and self._service_started:
             self._sync_worker_pool()
