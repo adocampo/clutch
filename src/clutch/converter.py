@@ -1214,7 +1214,7 @@ def _read_last_error_lines(log_path: str, max_lines: int = 30) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-        if re.search(r"Encoding:.*?\d+\.\d+ %", stripped):
+        if re.search(r"(?:Encoding:.*?\d+\.\d+ %|encoding:.*?,\s*\d+\.\d+\s*%)", stripped):
             continue
         meaningful.append(stripped)
     if not meaningful:
@@ -1587,10 +1587,15 @@ def confirm_prompt() -> bool:
 
 
 def _extract_progress_percent(line: str) -> Optional[float]:
+    # HandBrake format: "Encoding: 45.67 %"
     match = re.search(r"Encoding:.*? (\d+\.\d+) %", line)
-    if not match:
-        return None
-    return float(match.group(1))
+    if match:
+        return float(match.group(1))
+    # SVT-AV1 format: "encoding: task 2 of 2, 0.45 %"
+    match = re.search(r"encoding:.*?,\s*(\d+\.\d+)\s*%", line)
+    if match:
+        return float(match.group(1))
+    return None
 
 
 def _consume_pty_output(
