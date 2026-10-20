@@ -2000,12 +2000,20 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             elif normalized_codec == "av1_qsv":
                 hb_params.extend(["--preset", "AV1 QSV 2160p 4K"])
             elif normalized_codec.startswith("vce_") and uses_vce_encoder(codec, encode_speed):
-                hb_params.extend([
+                vce_args = [
                     "-e", codec,
                     "-w", resolution.split("x")[0],
                     "-l", resolution.split("x")[1],
                     "-q", "22",
-                ])
+                ]
+                # AMD VCE AV1 defaults to "balanced" which compresses worse than
+                # NVENC or CPU AV1 at the same CRF. Force the highest-quality
+                # preset so AV1 files are as small (or smaller) than H.265/NVENC.
+                if "av1" in normalized_codec:
+                    vce_args.extend(["--encoder-preset", "high quality"])
+                elif "265" in normalized_codec or "hevc" in normalized_codec:
+                    vce_args.extend(["--encoder-preset", "quality"])
+                hb_params.extend(vce_args)
             elif normalized_codec.startswith("vce_") and not uses_vce_encoder(codec, encode_speed) and is_vaapi_fallback_available():
                 # VCE failed but VA-API works — delegate to ffmpeg
                 from clutch.ffmpeg_converter import convert_video_ffmpeg
@@ -2061,13 +2069,21 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     selected_codec = "x265"
                 else:
                     selected_codec = "x264"
-            hb_params.extend([
+            fast_args = [
                 "-e", selected_codec,
                 "-w", resolution.split("x")[0],
                 "-l", resolution.split("x")[1],
                 "-q", "30",
                 "--vb", "1000",
-            ])
+            ]
+            # In fast mode, use "quality" preset for VCE AV1 (not "high quality"
+            # which would negate the speed benefit). This still improves
+            # compression over the default "balanced".
+            if "vce_av1" in selected_codec:
+                fast_args.extend(["--encoder-preset", "quality"])
+            elif "vce_h265" in selected_codec:
+                fast_args.extend(["--encoder-preset", "quality"])
+            hb_params.extend(fast_args)
         nvenc_requested = uses_nvenc_encoder(codec, encode_speed)
         vce_requested = uses_vce_encoder(codec, encode_speed)
         if gpu_device is not None and uses_nvenc_encoder(codec, encode_speed):
