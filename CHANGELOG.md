@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0.dev0] - 2026-10-20
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
+
+### Added in 2.7.0.dev0
+
+- **Stable / Dev update channels**: choose which channel Clutch checks for updates against — **stable** (latest official release) or **dev** (latest development build). Available in the dashboard (release panel), via the API (`POST /updates/channel`), and from the CLI (`clutch --update --channel dev`).
+- **Channel switching with rollback**: switching channel installs the selected channel's build in both directions — upgrade (stable → dev) and rollback (dev → stable) — so you can try a dev build and return to stable without losing the ability to switch again.
+- **PEP 440 dev-version support**: version comparison now understands dev builds (e.g. `2.7.0.dev0`), so the updater correctly orders `stable < dev < final` releases.
+
+### Improved in 2.7.0.dev0
+
+- **AMD VCE AV1 compression**: AMD VCE AV1 now defaults to the highest-quality encoder preset (`high quality`), so AV1 files encoded on AMD GPUs are as small as — or smaller than — H.265/NVENC at equal quality. Previously the `balanced` preset made AV1/AMD files noticeably larger than H.265/NVENC.
+
 ## [2.6.9] - 2026-10-17
 
 ### Fixed in 2.6.9
