@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.10] - 2026-10-20
+
+### Added in 2.6.10
+
+- **Stable / Dev update channels**: you can now choose which channel Clutch checks for updates against — **stable** (the latest official release) or **dev** (the latest development build). This is available in the dashboard (release panel), via the API (`POST /updates/channel`), and from the CLI (`clutch --update --channel dev`).
+- **Channel switching with rollback**: switching channel installs the selected channel's build in both directions — upgrade (stable → dev) and rollback (dev → stable) — so you can try a dev build and return to stable without losing the ability to switch again.
+- **PEP 440 dev-version support**: version comparison now understands dev builds (e.g. `2.7.0.dev0`), so the updater correctly orders `stable < dev < final` releases.
+
 ## [2.6.9] - 2026-10-17
 
 ### Fixed in 2.6.9
