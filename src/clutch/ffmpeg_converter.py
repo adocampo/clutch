@@ -358,6 +358,12 @@ def _get_source_info(input_file: str, media_info_data: Optional[dict] = None) ->
 # The mapping is roughly 1:1 for HEVC; for H.264 it's also close.
 DEFAULT_QP = 22
 
+# AV1 hardware encoders use a different QP scale than HEVC: at the same QP,
+# AV1 produces noticeably higher quality (roughly 6 QP steps better), which
+# results in files ~2x larger than HEVC at the same CRF. Apply this offset
+# so that a CRF 22 request yields comparable file sizes across codecs.
+AV1_QP_OFFSET = 6
+
 
 def build_ffmpeg_command(
     input_file: str,
@@ -450,7 +456,12 @@ def build_ffmpeg_command(
                     cmd.pop(idx)  # remove value
                 cmd.extend(["-b:v", f"{qv}k"])
             else:
-                # Replace the default QP with the preset value
+                # Replace the default QP with the preset value. AV1 hardware
+                # encoders use a different QP scale than HEVC (see
+                # AV1_QP_OFFSET), so apply the same offset to keep file sizes
+                # comparable across codecs.
+                if "av1" in encoder:
+                    qv = min(qv + AV1_QP_OFFSET, 63)
                 idx = _find_arg_index(cmd, "-qp")
                 if idx >= 0 and idx + 1 < len(cmd):
                     cmd[idx + 1] = str(qv)
@@ -802,6 +813,11 @@ def convert_video_ffmpeg(
     else:
         ffmpeg_encoder = resolve_vaapi_encoder(codec)
         backend_label = "ffmpeg VA-API"
+        # AV1 hardware encoders use a different QP scale than HEVC (see
+        # AV1_QP_OFFSET). Shift the QP so the same CRF request produces
+        # comparable file sizes across codecs.
+        if "av1" in ffmpeg_encoder:
+            qp = min(qp + AV1_QP_OFFSET, 63)
 
     # Audio settings
     audio_mode = "passthrough" if audio_passthrough else "encode"

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0.dev3] - 2026-10-21
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
+
+### Fixed in 2.7.0.dev3
+
+- **VA-API AV1 file size**: AV1 hardware encoders use a different QP scale than HEVC — at the same QP they produce noticeably higher quality (roughly 6 QP steps better), which made AV1 files ~2x larger than HEVC at the same CRF (e.g. an 11 GB H.265 source became a 23 GB AV1 file). A QP offset of +6 is now applied to `av1_vaapi` so that the same quality request yields comparable file sizes across codecs.
+
 ## [2.7.0.dev2] - 2026-10-20
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.
