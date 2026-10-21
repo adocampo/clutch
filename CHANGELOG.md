@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0.dev4] - 2026-10-22
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
+
+### Fixed in 2.7.0.dev4
+
+- **VA-API AV1 file size (real fix)**: the AMD VA-API AV1 encoder (`av1_vaapi`) ignores the `-qp` option entirely and encodes at a fixed ~17 Mbps, which made AV1 output ~2x larger than the source (e.g. an 11 GB H.265 became a 23 GB AV1 file). AV1 now encodes with a bitrate target of 80% of the source video bitrate (AV1 is more efficient than HEVC, so this yields a smaller file at comparable or better quality). An explicit ABR bitrate in the preset still overrides it. The QP offset from 2.7.0.dev3 is removed as it had no effect.
+
 ## [2.7.0.dev3] - 2026-10-21
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.
