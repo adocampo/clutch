@@ -206,6 +206,8 @@ clutch -r ~/Videos/
 
 If your system also has `clutch` installed through `pipx`, activate `.venv` before running it so the virtual environment version takes priority in `PATH`.
 
+Work happens on the `dev` branch (the default). `master` only ever holds released versions, so cloning `master` gives you exactly the last stable release. See [Branching and Releases](docs/wiki/Branching-and-Releases.md) for the full policy.
+
 ## Updating
 
 ### Self-update from the tool itself

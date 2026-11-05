@@ -1,10 +1,13 @@
 name: Build and push Docker images
 
+# Publishing is tag-driven only: a version tag is what decides whether the
+# build lands on `latest` (final release) or `dev` (prerelease). A manual
+# dispatch has no version to derive tags from, so it is deliberately not
+# offered.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -35,16 +38,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
-          # PEP 440 (not semver) so dev versions like 2.7.0.dev4 are valid tags.
-          # With latest=auto, `latest` is only applied to final releases.
+          # PEP 440 (not semver) so dev versions like 2.7.0.dev5 are valid tags.
+          # `latest` comes from the version number, not from the branch: with
+          # latest=auto, pep440 only marks final releases as latest, so a
+          # prerelease/dev tag can never overwrite the stable image.
           flavor: |
             latest=auto
           tags: |
             type=pep440,pattern={{version}}
             type=pep440,pattern={{major}}.{{minor}}
             type=pep440,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            # Dev builds (tags like v2.7.0.dev4) also get a rolling `dev` tag.
+            # Dev builds (tags like v2.7.0.dev5) also get a rolling `dev` tag.
             type=raw,value=dev,enable=${{ contains(github.ref_name, '.dev') }}
 
       - name: Build and push (full)
@@ -83,16 +87,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/clutch-minimal
-          # PEP 440 (not semver) so dev versions like 2.7.0.dev4 are valid tags.
-          # With latest=auto, `latest` is only applied to final releases.
+          # PEP 440 (not semver) so dev versions like 2.7.0.dev5 are valid tags.
+          # `latest` comes from the version number, not from the branch: with
+          # latest=auto, pep440 only marks final releases as latest, so a
+          # prerelease/dev tag can never overwrite the stable image.
           flavor: |
             latest=auto
           tags: |
             type=pep440,pattern={{version}}
             type=pep440,pattern={{major}}.{{minor}}
             type=pep440,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            # Dev builds (tags like v2.7.0.dev4) also get a rolling `dev` tag.
+            # Dev builds (tags like v2.7.0.dev5) also get a rolling `dev` tag.
             type=raw,value=dev,enable=${{ contains(github.ref_name, '.dev') }}
 
       - name: Build and push (minimal)
