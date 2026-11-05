@@ -87,6 +87,7 @@ class ConversionService:
         gpu_devices: Optional[object] = None,
         worker_poll_interval: float = 1.0,
         schedule_config: Optional[Dict[str, object]] = None,
+        update_channel: Optional[str] = None,
     ):
         self.store = JobStore(db_path)
         self.auth = AuthStore(self.store._conn, self.store._lock)
@@ -133,6 +134,11 @@ class ConversionService:
             self.gpu_devices,
             schedule_config or {},
         )
+        # An explicit channel (e.g. CLUTCH_UPDATE_CHANNEL in Docker) wins over
+        # whatever the dashboard last saved, and is persisted so the dashboard
+        # selector reflects it.
+        if update_channel:
+            self.set_update_channel(update_channel)
 
     def _load_persisted_state(
         self,
@@ -2558,6 +2564,7 @@ def run_service(
     watch_settle_time: float,
     watch_job_template: Dict[str, object],
     schedule_config: Optional[Dict[str, object]] = None,
+    update_channel: Optional[str] = None,
 ):
     import signal as _signal
 
@@ -2573,6 +2580,7 @@ def run_service(
         worker_count=worker_count,
         gpu_devices=gpu_devices,
         schedule_config=schedule_config,
+        update_channel=update_channel,
     )
 
     # Set up application file logging

@@ -6,6 +6,9 @@
 #    ./docker-release.sh              # uses version from pyproject.toml
 #    ./docker-release.sh 2.1.3        # override version tag
 #
+#  Dev/prerelease versions (e.g. 2.7.0.dev4) are tagged :dev instead of
+#  :latest, so the stable rolling tag is never overwritten by a dev build.
+#
 #  Requires:
 #    • .ghcr-token file in the repo root (gitignored) with your PAT
 #    • Docker with buildx support
@@ -41,6 +44,18 @@ echo "│  Clutch Docker Release — v${VERSION}"
 echo "╰──────────────────────────────────────────────╯"
 echo ""
 
+# ── Determine channel ────────────────────────────────────────────────
+# Dev/prerelease builds (2.7.0.dev4, 2.7.0rc1, 2.7.0b2, 2.7.0a1) must never
+# overwrite :latest — they get the rolling :dev tag instead.
+if [[ "$VERSION" =~ \.dev[0-9]+$ || "$VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+    CHANNEL="dev"
+    ROLLING_TAG="dev"
+else
+    CHANNEL="stable"
+    ROLLING_TAG="latest"
+fi
+echo "→ Channel: $CHANNEL (rolling tag :$ROLLING_TAG)"
+
 # ── Login ────────────────────────────────────────────────────────────
 echo "→ Logging in to $REGISTRY..."
 echo "$TOKEN" | docker login "$REGISTRY" -u "$NAMESPACE" --password-stdin
@@ -50,33 +65,33 @@ FULL_IMAGE="$REGISTRY/$NAMESPACE/clutch"
 echo ""
 echo "→ Building $FULL_IMAGE..."
 docker build -f "$SCRIPT_DIR/Dockerfile" \
-    -t "$FULL_IMAGE:latest" \
+    -t "$FULL_IMAGE:$ROLLING_TAG" \
     -t "$FULL_IMAGE:$VERSION" \
     "$SCRIPT_DIR"
 
 echo "→ Pushing $FULL_IMAGE:$VERSION..."
 docker push "$FULL_IMAGE:$VERSION"
-echo "→ Pushing $FULL_IMAGE:latest..."
-docker push "$FULL_IMAGE:latest"
+echo "→ Pushing $FULL_IMAGE:$ROLLING_TAG..."
+docker push "$FULL_IMAGE:$ROLLING_TAG"
 
 # ── Build & push: clutch-minimal ─────────────────────────────────────
 MINIMAL_IMAGE="$REGISTRY/$NAMESPACE/clutch-minimal"
 echo ""
 echo "→ Building $MINIMAL_IMAGE..."
 docker build -f "$SCRIPT_DIR/Dockerfile.minimal" \
-    -t "$MINIMAL_IMAGE:latest" \
+    -t "$MINIMAL_IMAGE:$ROLLING_TAG" \
     -t "$MINIMAL_IMAGE:$VERSION" \
     "$SCRIPT_DIR"
 
 echo "→ Pushing $MINIMAL_IMAGE:$VERSION..."
 docker push "$MINIMAL_IMAGE:$VERSION"
-echo "→ Pushing $MINIMAL_IMAGE:latest..."
-docker push "$MINIMAL_IMAGE:latest"
+echo "→ Pushing $MINIMAL_IMAGE:$ROLLING_TAG..."
+docker push "$MINIMAL_IMAGE:$ROLLING_TAG"
 
 # ── Done ─────────────────────────────────────────────────────────────
 echo ""
 echo "✔ Released:"
 echo "    $FULL_IMAGE:$VERSION"
-echo "    $FULL_IMAGE:latest"
+echo "    $FULL_IMAGE:$ROLLING_TAG"
 echo "    $MINIMAL_IMAGE:$VERSION"
-echo "    $MINIMAL_IMAGE:latest"
+echo "    $MINIMAL_IMAGE:$ROLLING_TAG"

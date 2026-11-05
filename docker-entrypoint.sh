@@ -114,6 +114,12 @@ if [ "${CLUTCH_DEBUG:-false}" = "true" ]; then
     ARGS="$ARGS --debug"
 fi
 
+# Update channel (stable | dev). Match it to the image tag you are running:
+# clutch:dev -> dev, clutch:latest -> stable.
+if [ -n "$CLUTCH_UPDATE_CHANNEL" ]; then
+    ARGS="$ARGS --update-channel $CLUTCH_UPDATE_CHANNEL"
+fi
+
 # If arguments were passed directly (e.g. docker run ... clutch --serve ...),
 # use them as-is instead of the generated ones.
 if [ $# -gt 0 ]; then

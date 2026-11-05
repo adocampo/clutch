@@ -1,12 +1,18 @@
 # ┌──────────────────────────────────────────────────────────────────────┐
 # │  Clutch — Video transcoding service                                 │
 # │                                                                     │
-# │  IMAGE OPTIONS (uncomment ONE):                                     │
-# │    • clutch:latest          — Full Arch image (~1.5 GB), includes   │
-# │                               shell, package manager, in-place      │
-# │                               upgrades via `clutch --upgrade`.      │
-# │    • clutch-minimal:latest  — Scratch-based (~280 MB), no shell,    │
-# │                               must rebuild/pull to upgrade.         │
+# │  IMAGE VARIANT (uncomment ONE):                                     │
+# │    • clutch          — Full Arch image (~1.5 GB), includes shell,   │
+# │                        package manager, in-place upgrades via       │
+# │                        `clutch --upgrade`.                          │
+# │    • clutch-minimal  — Scratch-based (~280 MB), no shell, must      │
+# │                        rebuild/pull to upgrade.                     │
+# │                                                                     │
+# │  IMAGE TAG (set CLUTCH_IMAGE_TAG in a .env file next to this file,  │
+# │  or export it before `docker compose up`):                          │
+# │    • latest (default) — latest stable release                       │
+# │    • dev              — latest development build (prerelease)       │
+# │    • 2.6.11           — a specific version                          │
 # │                                                                     │
 # │  BUILD FROM SOURCE (instead of pulling from ghcr.io):               │
 # │    Comment out "image:" and uncomment the "build:" section below.   │
@@ -14,8 +20,8 @@
 services:
   clutch:
     # ── Image: pick one ──────────────────────────────────────────────
-    image: ghcr.io/adocampo/clutch:latest
-    # image: ghcr.io/adocampo/clutch-minimal:latest
+    image: ghcr.io/adocampo/clutch:${CLUTCH_IMAGE_TAG:-latest}
+    # image: ghcr.io/adocampo/clutch-minimal:${CLUTCH_IMAGE_TAG:-latest}
 
     # ── Build from source (comment out "image:" above first) ─────────
     # build:
@@ -41,6 +47,9 @@ services:
       - CLUTCH_WORKERS=1
       # ── Debug ──
       # - CLUTCH_DEBUG=true
+      # ── Update channel used by the in-dashboard updater (stable | dev) ──
+      # Match this to the image tag: `dev` image → dev channel.
+      # - CLUTCH_UPDATE_CHANNEL=stable
 
     # ── NVIDIA GPU passthrough (uncomment for hardware encoding) ──
     # deploy:

@@ -125,7 +125,19 @@ docker run -d \
   ghcr.io/adocampo/clutch:latest
 ```
 
-Or use the provided `docker-compose.yml` (edit to pick full or minimal):
+Both images also publish a `dev` tag tracking the latest development build (the same builds published as GitHub prereleases):
+
+```bash
+docker run -d \
+  --name clutch \
+  -p 8765:8765 \
+  -v clutch-config:/config \
+  -v /path/to/media:/media \
+  -e CLUTCH_UPDATE_CHANNEL=dev \
+  ghcr.io/adocampo/clutch:dev
+```
+
+Or use the provided `docker-compose.yml` (edit to pick full or minimal, and set `CLUTCH_IMAGE_TAG` in a `.env` file to select `latest` or `dev`):
 
 ```bash
 docker compose up -d
@@ -207,6 +219,15 @@ clutch --update
 # Upgrade to the latest version
 clutch --upgrade
 ```
+
+You can follow the **dev** channel instead of stable, which tracks the builds published as GitHub prereleases:
+
+```bash
+clutch --update --channel dev
+clutch --upgrade --channel dev
+```
+
+Switching channel works in both directions, so you can go back to stable with `--channel stable`. The same selector is available in the dashboard release panel. For Docker, pin the channel with the image tag (`:dev` / `:latest`) — see the [Docker wiki page](docs/wiki/Docker.md).
 
 ### Manual update with pipx
 
@@ -659,7 +680,8 @@ usage: clutch [-h] [-o OUTPUT] [--find [PATTERN]] [-r] [-ds] [-c CODEC]
                      [--service-db SERVICE_DB] [--allow-root ALLOW_ROOT]
                      [--watch-dir WATCH_DIR] [--watch-recursive]
                      [--watch-poll-interval WATCH_POLL_INTERVAL]
-                     [--watch-settle-time WATCH_SETTLE_TIME] [-si] [-v]
+                     [--watch-settle-time WATCH_SETTLE_TIME]
+                     [--update-channel CHANNEL] [-si] [-v]
                      [--update] [--upgrade]
                      [input_files ...]
 
@@ -724,10 +746,17 @@ service:
   --watch-settle-time WATCH_SETTLE_TIME
                         Seconds a watched file must remain unchanged before
                         enqueueing.
+  --update-channel CHANNEL
+                        Update channel for the built-in updater (stable |
+                        dev). Overrides the channel saved in the dashboard on
+                        every start. Also reads CLUTCH_UPDATE_CHANNEL.
 
 info:
   -si, --source-info    Show source information about a single video file.
   -v, --version         show program's version number and exit
   --update              Check if a newer version is available on GitHub.
   --upgrade             Upgrade to the latest version from GitHub.
+  --channel {stable,dev}
+                        Update channel to check/upgrade against (default:
+                        stable).
 ```

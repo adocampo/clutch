@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Docker `dev` image tag**: `ghcr.io/adocampo/clutch:dev` and `ghcr.io/adocampo/clutch-minimal:dev` now track the latest development build (the same GitHub prereleases the `dev` update channel uses), so Docker users can follow the dev channel without losing the image on every container recreate. This also fixes the Docker publish workflow, which failed for every dev tag because `2.7.0.dev4` is not valid semver — tags are now derived with `type=pep440`.
+- **`CLUTCH_UPDATE_CHANNEL` / `--update-channel`**: pin the updater channel from the environment or the CLI (e.g. `CLUTCH_UPDATE_CHANNEL=dev`). When set, it overrides the channel saved in the dashboard on every start, so a `:dev` container stops offering stable "upgrades".
+- **`CLUTCH_IMAGE_TAG` in `docker-compose.yml`**: the image tag is now a variable (default `latest`), so switching between `latest`, `dev` and a pinned version needs a `.env` entry instead of editing the compose file.
+
+### Fixed
+
+- **Dev builds no longer overwrite `:latest`**: `docker-release.sh` and `docker-publish.sh` read the version from `pyproject.toml` and always pushed `:latest`, which would have published a `.dev` build as the stable image. Prerelease versions now push the rolling `:dev` tag instead.
+
 ## [2.7.0.dev4] - 2026-10-22
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.

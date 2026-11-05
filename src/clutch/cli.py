@@ -804,6 +804,11 @@ def main():
                                help="Polling interval in seconds for watched directories.")
     service_group.add_argument("--watch-settle-time", type=float, default=30.0,
                                help="Seconds a watched file must remain unchanged before enqueueing.")
+    service_group.add_argument("--update-channel", default=os.environ.get("CLUTCH_UPDATE_CHANNEL") or None,
+                               choices=["stable", "dev"], metavar="CHANNEL",
+                               help="Update channel for the built-in updater (stable | dev). When set, it "
+                                    "overrides the channel saved in the dashboard on every start. "
+                                    "Also reads CLUTCH_UPDATE_CHANNEL.")
 
     # ── Schedule ─────────────────────────────
     sched_group = parser.add_argument_group("schedule")
@@ -974,6 +979,7 @@ def main():
                 "default_preset_id": _resolve_cli_preset_id(args.preset) if args.preset else "",
             },
             schedule_config=schedule_config,
+            update_channel=args.update_channel,
         )
         sys.exit(0)
 

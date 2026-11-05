@@ -35,11 +35,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
+          # PEP 440 (not semver) so dev versions like 2.7.0.dev4 are valid tags.
+          # With latest=auto, `latest` is only applied to final releases.
+          flavor: |
+            latest=auto
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=pep440,pattern={{version}}
+            type=pep440,pattern={{major}}.{{minor}}
+            type=pep440,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
+            # Dev builds (tags like v2.7.0.dev4) also get a rolling `dev` tag.
+            type=raw,value=dev,enable=${{ contains(github.ref_name, '.dev') }}
 
       - name: Build and push (full)
         uses: docker/build-push-action@v6
@@ -77,11 +83,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/clutch-minimal
+          # PEP 440 (not semver) so dev versions like 2.7.0.dev4 are valid tags.
+          # With latest=auto, `latest` is only applied to final releases.
+          flavor: |
+            latest=auto
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=pep440,pattern={{version}}
+            type=pep440,pattern={{major}}.{{minor}}
+            type=pep440,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
+            # Dev builds (tags like v2.7.0.dev4) also get a rolling `dev` tag.
+            type=raw,value=dev,enable=${{ contains(github.ref_name, '.dev') }}
 
       - name: Build and push (minimal)
         uses: docker/build-push-action@v6
