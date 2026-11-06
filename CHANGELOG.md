@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- **Docker scheduling variables.** `CLUTCH_SCHEDULE`, `CLUTCH_SCHEDULE_MODE`, `CLUTCH_PRICE_PROVIDER`, `CLUTCH_PRICE_COUNTRY` and `CLUTCH_PRICE_LIMIT` are no longer accepted by `docker-entrypoint.sh` nor wired through `docker-compose.yml`. They only seeded a brand-new service database: as soon as any configuration was saved from the dashboard, the stored schedule and price rules silently won and the variables did nothing at all. Time windows and electricity-price rules are configured on the dashboard **Schedule** page. The equivalent CLI flags (`--schedule`, `--price-provider`, …) are unchanged and still seed a fresh install.
+
 ## [2.7.0.dev7] - 2026-11-06
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.

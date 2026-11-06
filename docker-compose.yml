@@ -61,11 +61,9 @@ services:
       - CLUTCH_GPUS=${CLUTCH_GPUS:-}
       - CLUTCH_WATCH_DIRS=${CLUTCH_WATCH_DIRS:-}
       - CLUTCH_WATCH_RECURSIVE=${CLUTCH_WATCH_RECURSIVE:-}
-      - CLUTCH_SCHEDULE=${CLUTCH_SCHEDULE:-}
-      - CLUTCH_SCHEDULE_MODE=${CLUTCH_SCHEDULE_MODE:-}
-      - CLUTCH_PRICE_PROVIDER=${CLUTCH_PRICE_PROVIDER:-}
-      - CLUTCH_PRICE_COUNTRY=${CLUTCH_PRICE_COUNTRY:-}
-      - CLUTCH_PRICE_LIMIT=${CLUTCH_PRICE_LIMIT:-}
+      # Scheduling and electricity-price rules are configured in the dashboard
+      # (Schedule page) and stored in the service database, so they are not
+      # exposed here.
 
     # ── NVIDIA GPU passthrough (uncomment for hardware encoding) ──
     # deploy:

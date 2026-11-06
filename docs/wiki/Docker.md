@@ -121,8 +121,7 @@ docker compose up -d
 `docker compose` reads `.env` automatically. Every variable has a default, so a
 missing `.env` still works — the example file documents all of them
 (`CLUTCH_IMAGE_TAG`, `CLUTCH_IMAGE_VARIANT`, `CLUTCH_MEDIA_DIR`, `CLUTCH_UID`,
-`CLUTCH_WORKERS`, `CLUTCH_GPUS`, `CLUTCH_WATCH_DIRS`, `CLUTCH_SCHEDULE`,
-`CLUTCH_PRICE_*`, ...).
+`CLUTCH_WORKERS`, `CLUTCH_GPUS`, `CLUTCH_WATCH_DIRS`, ...).
 
 ### Switching images
 
@@ -232,20 +231,17 @@ All configuration is done through environment variables. When arguments are pass
 | `CLUTCH_WATCH_DIRS` | *(none)* | Comma-separated directories to watch for new files |
 | `CLUTCH_WATCH_RECURSIVE` | `false` | Watch directories recursively |
 
-### Scheduling
+### Scheduling and electricity prices
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLUTCH_SCHEDULE` | *(none)* | Schedule rule (e.g. `mon-fri 22:00-08:00`) |
-| `CLUTCH_SCHEDULE_MODE` | *(none)* | `allow` or `block` |
+These are **not** environment variables. Time windows, price providers and price
+thresholds live in the service database and are configured from the dashboard
+(Schedule page).
 
-### Price-based scheduling
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLUTCH_PRICE_PROVIDER` | *(none)* | `energy_charts` or `entsoe` |
-| `CLUTCH_PRICE_COUNTRY` | *(none)* | Bidding zone code (e.g. `ES`, `DE-LU`, `FR`) |
-| `CLUTCH_PRICE_LIMIT` | *(none)* | Max price in EUR/MWh to allow conversions |
+The CLI also accepts `--schedule`, `--schedule-mode`, `--price-provider`,
+`--price-country` and `--price-limit`, but they only seed a brand-new database:
+once any configuration has been persisted, the stored values always win. Passing
+them through the environment would be misleading, so the entrypoint does not
+expose them.
 
 ---
 
@@ -347,21 +343,6 @@ docker run -d \
   -e CLUTCH_ALLOW_ROOTS=/downloads,/media \
   -e CLUTCH_WATCH_DIRS=/downloads \
   -e CLUTCH_WATCH_RECURSIVE=true \
-  ghcr.io/adocampo/clutch:latest
-```
-
-### Schedule conversions at night (Spain electricity pricing)
-
-```bash
-docker run -d \
-  --name clutch \
-  -p 8765:8765 \
-  -v clutch-config:/config \
-  -v /srv/media:/media \
-  -e CLUTCH_WORKERS=2 \
-  -e CLUTCH_PRICE_PROVIDER=energy_charts \
-  -e CLUTCH_PRICE_COUNTRY=ES \
-  -e CLUTCH_PRICE_LIMIT=50 \
   ghcr.io/adocampo/clutch:latest
 ```
 
