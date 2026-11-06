@@ -38,9 +38,19 @@ Both images contain the same tools (HandBrakeCLI, mediainfo, mkvmerge, mkvproped
 | Tag pattern | Example | Description |
 |-------------|---------|-------------|
 | `latest` | `clutch:latest` | Latest stable release |
-| `<version>` | `clutch:2.2.0` | Specific version |
+| `dev` | `clutch:dev` | Latest development build (prerelease) |
+| `<version>` | `clutch:2.2.0` | Specific stable version |
+| `<version>` | `clutch:2.7.0.dev4` | Specific dev build |
 | `latest` | `clutch-minimal:latest` | Latest stable minimal |
+| `dev` | `clutch-minimal:dev` | Latest development minimal |
 | `<version>` | `clutch-minimal:2.2.0` | Specific minimal version |
+
+The `dev` tag tracks the same builds published as GitHub **prereleases** — the
+same source the in-app `dev` update channel uses. It is not tested as thoroughly
+as `latest`; expect bugs.
+
+Switching between `latest` and `dev` is a plain tag change, so you can move to
+dev to try something and roll back to stable by pulling again.
 
 ---
 
@@ -100,23 +110,55 @@ Alternatively, pushing a Git tag (`v*`) triggers the GitHub Actions workflow at 
 
 ## Docker Compose
 
-A single `docker-compose.yml` is provided in the repository. It pulls from GHCR by default and includes commented-out options for the minimal image and building from source.
+A single `docker-compose.yml` is provided in the repository. It pulls from GHCR
+by default and every knob is a variable, so you should not need to edit it.
 
 ```bash
+cp .env.example .env   # then edit .env
 docker compose up -d
 ```
 
+`docker compose` reads `.env` automatically. Every variable has a default, so a
+missing `.env` still works — the example file documents all of them
+(`CLUTCH_IMAGE_TAG`, `CLUTCH_IMAGE_VARIANT`, `CLUTCH_MEDIA_DIR`, `CLUTCH_UID`,
+`CLUTCH_WORKERS`, `CLUTCH_GPUS`, `CLUTCH_WATCH_DIRS`, ...).
+
 ### Switching images
 
-Edit `docker-compose.yml` and uncomment the desired `image:` line:
+Set the variant in `.env` instead of editing `docker-compose.yml`:
 
-```yaml
-services:
-  clutch:
-    # Pick ONE image:
-    image: ghcr.io/adocampo/clutch:latest           # Full (default)
-    # image: ghcr.io/adocampo/clutch-minimal:latest # Minimal (~280 MB)
+```bash
+# .env
+CLUTCH_IMAGE_VARIANT=clutch-minimal   # full image (default) | minimal image
 ```
+
+### Choosing the release channel (`latest` vs `dev`)
+
+The image tag comes from `CLUTCH_IMAGE_TAG`, so you do not have to edit
+`docker-compose.yml`. Put it in `.env`:
+
+```bash
+# .env
+CLUTCH_IMAGE_TAG=dev
+CLUTCH_UPDATE_CHANNEL=dev
+```
+
+or export it for a single command:
+
+```bash
+CLUTCH_IMAGE_TAG=dev docker compose pull
+CLUTCH_IMAGE_TAG=dev docker compose up -d
+```
+
+`CLUTCH_UPDATE_CHANNEL` tells the in-app updater which channel you are on, so
+the dashboard stops offering you a "newer" stable build over your dev one. It is
+optional — the dashboard can also switch channel manually — but when it is set
+the container always starts on that channel, which is what you want when the
+image tag is the thing you pinned.
+
+To go back to stable, set `CLUTCH_IMAGE_TAG=latest` and
+`CLUTCH_UPDATE_CHANNEL=stable` (or remove both), then
+`docker compose pull && docker compose up -d`.
 
 ### Building from source
 
@@ -180,6 +222,7 @@ All configuration is done through environment variables. When arguments are pass
 | `CLUTCH_GPUS` | *(none)* | Comma-separated NVENC GPU indices (e.g. `0` or `0,1`) |
 | `CLUTCH_ALLOW_ROOTS` | `/media` | Comma-separated filesystem roots allowed for I/O |
 | `CLUTCH_DEBUG` | `false` | Enable debug logging (`true` / `false`) |
+| `CLUTCH_UPDATE_CHANNEL` | *(image tag)* | Update channel used by the in-dashboard updater (`stable` / `dev`) |
 
 ### Watch directories
 
@@ -188,20 +231,17 @@ All configuration is done through environment variables. When arguments are pass
 | `CLUTCH_WATCH_DIRS` | *(none)* | Comma-separated directories to watch for new files |
 | `CLUTCH_WATCH_RECURSIVE` | `false` | Watch directories recursively |
 
-### Scheduling
+### Scheduling and electricity prices
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLUTCH_SCHEDULE` | *(none)* | Schedule rule (e.g. `mon-fri 22:00-08:00`) |
-| `CLUTCH_SCHEDULE_MODE` | *(none)* | `allow` or `block` |
+These are **not** environment variables. Time windows, price providers and price
+thresholds live in the service database and are configured from the dashboard
+(Schedule page).
 
-### Price-based scheduling
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLUTCH_PRICE_PROVIDER` | *(none)* | `energy_charts` or `entsoe` |
-| `CLUTCH_PRICE_COUNTRY` | *(none)* | Bidding zone code (e.g. `ES`, `DE-LU`, `FR`) |
-| `CLUTCH_PRICE_LIMIT` | *(none)* | Max price in EUR/MWh to allow conversions |
+The CLI also accepts `--schedule`, `--schedule-mode`, `--price-provider`,
+`--price-country` and `--price-limit`, but they only seed a brand-new database:
+once any configuration has been persisted, the stored values always win. Passing
+them through the environment would be misleading, so the entrypoint does not
+expose them.
 
 ---
 
@@ -303,21 +343,6 @@ docker run -d \
   -e CLUTCH_ALLOW_ROOTS=/downloads,/media \
   -e CLUTCH_WATCH_DIRS=/downloads \
   -e CLUTCH_WATCH_RECURSIVE=true \
-  ghcr.io/adocampo/clutch:latest
-```
-
-### Schedule conversions at night (Spain electricity pricing)
-
-```bash
-docker run -d \
-  --name clutch \
-  -p 8765:8765 \
-  -v clutch-config:/config \
-  -v /srv/media:/media \
-  -e CLUTCH_WORKERS=2 \
-  -e CLUTCH_PRICE_PROVIDER=energy_charts \
-  -e CLUTCH_PRICE_COUNTRY=ES \
-  -e CLUTCH_PRICE_LIMIT=50 \
   ghcr.io/adocampo/clutch:latest
 ```
 

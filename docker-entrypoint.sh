@@ -87,31 +87,20 @@ if [ "${CLUTCH_WATCH_RECURSIVE:-false}" = "true" ]; then
     ARGS="$ARGS --watch-recursive"
 fi
 
-# Schedule
-if [ -n "$CLUTCH_SCHEDULE" ]; then
-    ARGS="$ARGS --schedule $CLUTCH_SCHEDULE"
-fi
-
-if [ -n "$CLUTCH_SCHEDULE_MODE" ]; then
-    ARGS="$ARGS --schedule-mode $CLUTCH_SCHEDULE_MODE"
-fi
-
-# Price-based scheduling
-if [ -n "$CLUTCH_PRICE_PROVIDER" ]; then
-    ARGS="$ARGS --price-provider $CLUTCH_PRICE_PROVIDER"
-fi
-
-if [ -n "$CLUTCH_PRICE_COUNTRY" ]; then
-    ARGS="$ARGS --price-country $CLUTCH_PRICE_COUNTRY"
-fi
-
-if [ -n "$CLUTCH_PRICE_LIMIT" ]; then
-    ARGS="$ARGS --price-limit $CLUTCH_PRICE_LIMIT"
-fi
+# NOTE: scheduling and price-based scheduling are intentionally NOT exposed as
+# environment variables. They are stored in the service database and managed from
+# the dashboard (Schedule page); the CLI flags only seed a brand-new database, so
+# env vars would be silently ignored after the first run.
 
 # Debug mode
 if [ "${CLUTCH_DEBUG:-false}" = "true" ]; then
     ARGS="$ARGS --debug"
+fi
+
+# Update channel (stable | dev). Match it to the image tag you are running:
+# clutch:dev -> dev, clutch:latest -> stable.
+if [ -n "$CLUTCH_UPDATE_CHANNEL" ]; then
+    ARGS="$ARGS --update-channel $CLUTCH_UPDATE_CHANNEL"
 fi
 
 # If arguments were passed directly (e.g. docker run ... clutch --serve ...),

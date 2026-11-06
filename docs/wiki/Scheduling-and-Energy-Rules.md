@@ -2,6 +2,13 @@
 
 Clutch can enforce conversion windows with manual rules, electricity-price rules, or both.
 
+> [!NOTE]
+> The rules are stored in the service database and are normally managed from the
+> dashboard **Schedule** page. The CLI flags below only seed a brand-new database:
+> once any configuration has been saved from the dashboard, the stored values
+> always win and the flags are ignored. For that reason they are not exposed as
+> Docker environment variables either.
+
 ## Manual schedule rules
 
 Option:

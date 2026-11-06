@@ -495,6 +495,24 @@
         }
     }
 
+    // Assign a value to a <select> programmatically (loading a record into a
+    // form). The custom dropdown widget keeps a `wantedValue` dataset as its
+    // source of truth, and syncTrigger() re-applies it over any plain `.value`
+    // assignment — so a value picked earlier would silently win over the value
+    // being loaded. Always go through this helper instead of touching `.value`.
+    function setSelectValue(selectEl, value) {
+        if (!selectEl) return;
+        delete selectEl.dataset.wantedValue;
+        selectEl.value = value == null ? '' : String(value);
+        // If the option is missing (e.g. presets not loaded yet) the browser
+        // leaves the select empty; remember the intent so populatePresetSelects
+        // can restore it once the options exist.
+        if (selectEl.value === '' && value) {
+            selectEl.dataset.wantedValue = String(value);
+        }
+        syncCustomSelect(selectEl);
+    }
+
     function initCustomSelects() {
         Array.prototype.forEach.call(
             document.querySelectorAll('select:not([data-customized])'),
@@ -1242,10 +1260,10 @@
         watcherForm.elements.poll_interval.value = '5';
         watcherForm.elements.settle_time.value = '30';
         watcherForm.elements.delete_source.checked = settingsForm.elements.default_delete_source.checked;
-        watcherForm.elements.codec.value = '';
-        watcherForm.elements.encode_speed.value = '';
+        setSelectValue(watcherForm.elements.codec, '');
+        setSelectValue(watcherForm.elements.encode_speed, '');
         if (watcherForm.elements.preset_id) {
-            watcherForm.elements.preset_id.value = '';
+            setSelectValue(watcherForm.elements.preset_id, '');
             watcherForm.elements.preset_id.dispatchEvent(new Event('change'));
         }
         watcherForm.elements.audio_passthrough.checked = false;
@@ -2433,10 +2451,10 @@
                     watcherForm.elements.recursive.checked = Boolean(watcher.recursive);
                     watcherForm.elements.delete_source.checked = Boolean(watcher.delete_source);
                     setWatcherOutputDir(watcher.output_dir || '');
-                    watcherForm.elements.codec.value = watcher.codec || '';
-                    watcherForm.elements.encode_speed.value = watcher.encode_speed || '';
+                    setSelectValue(watcherForm.elements.codec, watcher.codec || '');
+                    setSelectValue(watcherForm.elements.encode_speed, watcher.encode_speed || '');
                     if (watcherForm.elements.preset_id) {
-                        watcherForm.elements.preset_id.value = watcher.preset_id || '';
+                        setSelectValue(watcherForm.elements.preset_id, watcher.preset_id || '');
                         watcherForm.elements.preset_id.dispatchEvent(new Event('change'));
                     }
                     watcherForm.elements.audio_passthrough.checked = Boolean(watcher.audio_passthrough);

@@ -92,10 +92,10 @@ Notes:
   - Manual allow/block windows.
 - `--schedule-mode {allow,block}`:
   - Interpret manual rules as allow-list or block-list.
-- `--price-provider {energy_charts,entsoe}`:
-  - Price source.
+- `--price-provider {ree_pvpc,energy_charts,entsoe}`:
+  - Price source. `ree_pvpc` is the Spanish regulated tariff (free, no key, Spain only).
 - `--price-country`:
-  - Bidding zone/country code.
+  - Bidding zone/country code. Ignored by `ree_pvpc`.
 - `--price-limit`:
   - Max EUR/MWh threshold.
 - `--price-cheapest-hours`:

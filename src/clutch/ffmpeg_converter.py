@@ -311,6 +311,7 @@ def _get_source_info(input_file: str, media_info_data: Optional[dict] = None) ->
         "width": 0,
         "height": 0,
         "duration_seconds": 0.0,
+        "video_bitrate_kbps": 0,
     }
 
     tracks = (media_info_data or {}).get("media", {}).get("track", [])
@@ -326,6 +327,10 @@ def _get_source_info(input_file: str, media_info_data: Optional[dict] = None) ->
                 pass
             try:
                 result["height"] = int(t.get("Height", 0))
+            except (TypeError, ValueError):
+                pass
+            try:
+                result["video_bitrate_kbps"] = int(int(t.get("BitRate", 0)) // 1000)
             except (TypeError, ValueError):
                 pass
 
@@ -357,6 +362,13 @@ def _get_source_info(input_file: str, media_info_data: Optional[dict] = None) ->
 #   CRF 18 ≈ QP 18, CRF 22 ≈ QP 22, CRF 28 ≈ QP 28
 # The mapping is roughly 1:1 for HEVC; for H.264 it's also close.
 DEFAULT_QP = 22
+
+# The AMD VA-API AV1 encoder (av1_vaapi) ignores the -qp option entirely and
+# encodes at a fixed ~17 Mbps regardless of the requested QP, which makes
+# output files ~2x larger than the source. Use a bitrate target instead:
+# AV1 is more efficient than HEVC, so 80% of the source bitrate yields a
+# smaller file at comparable or better quality.
+AV1_BITRATE_SOURCE_RATIO = 0.8
 
 
 def build_ffmpeg_command(
@@ -426,9 +438,28 @@ def build_ffmpeg_command(
 
     cmd.extend(["-vf", ",".join(vf_parts)])
 
-    # Video encoder
-    cmd.extend(["-c:v", encoder])
-    cmd.extend(["-qp", str(qp)])
+    # Video encoder. The AMD VA-API AV1 encoder ignores -qp entirely (it
+    # encodes at a fixed ~17 Mbps), so AV1 always uses a bitrate target
+    # derived from the source bitrate (see AV1_BITRATE_SOURCE_RATIO).
+    is_av1 = "av1" in encoder
+    if is_av1:
+        src_kbps = int((source_info or {}).get("video_bitrate_kbps", 0) or 0)
+        if src_kbps > 0:
+            target_kbps = max(500, int(src_kbps * AV1_BITRATE_SOURCE_RATIO))
+        else:
+            # No source bitrate available — fall back to a conservative
+            # default based on resolution.
+            w = int((source_info or {}).get("width", 0) or 0)
+            h = int((source_info or {}).get("height", 0) or 0)
+            if w >= 3840 or h >= 2160:
+                target_kbps = 12000
+            elif w >= 2560 or h >= 1440:
+                target_kbps = 6000
+            else:
+                target_kbps = 3000
+        cmd.extend(["-c:v", encoder, "-b:v", f"{target_kbps}k"])
+    else:
+        cmd.extend(["-c:v", encoder, "-qp", str(qp)])
 
     # Apply preset params overrides if provided
     if preset_params and isinstance(preset_params.get("video"), dict):
@@ -441,15 +472,13 @@ def build_ffmpeg_command(
             qv = None
         if qv is not None and qv > 0:
             if quality_mode == "abr":
-                # Remove the -qp and use bitrate instead
-                cmd = [a for i, a in enumerate(cmd) if not (cmd[max(0, i - 1):i + 1] == ["-qp", str(qp)])]
-                # Rebuild without -qp
-                idx = _find_arg_index(cmd, "-qp")
-                if idx >= 0:
-                    cmd.pop(idx)  # remove -qp
-                    cmd.pop(idx)  # remove value
-                cmd.extend(["-b:v", f"{qv}k"])
-            else:
+                # Explicit bitrate requested — use it as-is (works for AV1 too)
+                idx = _find_arg_index(cmd, "-b:v")
+                if idx >= 0 and idx + 1 < len(cmd):
+                    cmd[idx + 1] = f"{qv}k"
+                else:
+                    cmd.extend(["-b:v", f"{qv}k"])
+            elif not is_av1:
                 # Replace the default QP with the preset value
                 idx = _find_arg_index(cmd, "-qp")
                 if idx >= 0 and idx + 1 < len(cmd):

@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0] - 2026-11-06
+
+### Added
+
+- **Docker `dev` image tag**: `ghcr.io/adocampo/clutch:dev` and `ghcr.io/adocampo/clutch-minimal:dev` now track the latest development build, so Docker users can follow the dev channel without losing the image on every container recreate.
+- **`CLUTCH_UPDATE_CHANNEL` / `--update-channel`**: pin the updater channel from the environment or the CLI (e.g. `CLUTCH_UPDATE_CHANNEL=dev`). When set, it overrides the channel saved in the dashboard on every start, so a `:dev` container stops offering stable "upgrades".
+- **`.env.example`**: a fully commented template for the Docker Compose setup. Copy it to `.env` and configure everything there — image tag and variant, media and config paths, port, user mapping, workers, GPUs and watch directories — without editing `docker-compose.yml`. `.env` is now git-ignored.
+- **Branching and release policy** documented in the wiki: `dev` carries `X.Y.Z.devN` prereleases and publishes `:dev`; `master` carries final versions and publishes `:latest`.
+
+### Changed
+
+- **`docker-compose.yml` is now fully variable-driven.** The image variant (`CLUTCH_IMAGE_VARIANT`), tag (`CLUTCH_IMAGE_TAG`), host port (`CLUTCH_PORT`), media directory (`CLUTCH_MEDIA_DIR` / `CLUTCH_MEDIA_MOUNT`) and config location (`CLUTCH_CONFIG_DIR`) are all read from `.env`, and the remaining `CLUTCH_*` options the entrypoint understands are wired through as well. Every variable keeps a sane default, so the compose file still works with no `.env` at all.
+- The README and the Docker wiki page document the `dev` channel setup end to end (create `.env`, set `CLUTCH_IMAGE_TAG=dev` and `CLUTCH_UPDATE_CHANNEL=dev`, pull and recreate).
+- **AMD VCE AV1 compression**: AMD VCE AV1 now defaults to the highest-quality encoder preset (`high quality`), so AV1 files encoded on AMD GPUs are as small as — or smaller than — H.265/NVENC at equal quality.
+- Docker image tags are derived with `type=pep440` and `latest=auto`, so `:latest` is only ever published for final versions and a dev build can never overwrite the stable image.
+
+### Removed
+
+- **Docker scheduling variables.** `CLUTCH_SCHEDULE`, `CLUTCH_SCHEDULE_MODE`, `CLUTCH_PRICE_PROVIDER`, `CLUTCH_PRICE_COUNTRY` and `CLUTCH_PRICE_LIMIT` are not accepted by `docker-entrypoint.sh` nor wired through `docker-compose.yml`. They only seeded a brand-new service database: as soon as any configuration was saved from the dashboard, the stored schedule and price rules silently won and the variables did nothing at all. Time windows and electricity-price rules are configured on the dashboard **Schedule** page. The equivalent CLI flags (`--schedule`, `--price-provider`, …) are unchanged and still seed a fresh install.
+
+### Fixed
+
+- **Failed conversions no longer crash with `NameError: name 'last_err' is not defined`** instead of reporting the real HandBrake error. The VA-API fallback block in the failure path referenced variables that never existed in scope, so every failed job died before logging why it failed. The block — and its orphaned `_try_vaapi_conversion` helper — has been removed. AMD/Intel VA-API encoding is unaffected: it is dispatched before HandBrake runs.
+- **Hardware encoder failures now report the real cause instead of a `NameError` or "unknown video codec".** When the GPU refuses to initialise an NVENC/VCE encoder (`Provided device doesn't support required NVENC features`, `No capable devices found`, `avcodec_open failed`, exhausted NVENC sessions, driver mismatch), the job now fails with an actionable hint instead of silently spending hours on a CPU encode the user never asked for.
+- **Clutch now names the exact encoder option your GPU rejects.** HandBrake only blames the whole `--encopts` set, so when a job fails this way Clutch re-encodes a couple of seconds of the video once per option and reports precisely which one the card refused, e.g. `NVENC could not be initialised by the GPU: the encoder option(s) temporal-aq=1 are not supported by this graphics card. Remove temporal-aq=1 from the preset's encoder options and run the job again.` The probe is capped (16 options, 90 s total) and is skipped entirely when the bare command also fails, so a busy GPU or a driver problem is never misdiagnosed as a bad option.
+- **Editing a watcher now shows the preset that watcher actually uses.** The custom dropdown widget kept the last manually picked option as its source of truth, so opening a watcher for editing could display a completely different preset — and saving would silently overwrite the watcher with it. The same fix covers the codec and encode-speed dropdowns.
+- **VA-API AV1 file size**: the AMD VA-API AV1 encoder (`av1_vaapi`) ignores the `-qp` option entirely and encodes at a fixed ~17 Mbps, which made AV1 output ~2x larger than the source (an 11 GB H.265 became a 23 GB AV1 file). AV1 now encodes with a bitrate target of 80% of the source video bitrate, yielding a smaller file at comparable or better quality. An explicit ABR bitrate in the preset still overrides it.
+- **SVT-AV1 progress parsing**: SVT-AV1 uses `encoding: task X of Y, Z.ZZ %` instead of HandBrake's `Encoding: Z.ZZ %`. The old regex only matched the HandBrake format, so the dashboard stayed stuck at "EN EJECUCIÓN" with no size or compression info. Both formats are now recognized.
+- **In-app upgrades now do a live check first.** The web upgrade path used the cached update state, which could point at a version that no longer exists on GitHub, making the install fail and forcing a manual CLI upgrade.
+- **`--price-provider ree_pvpc` was rejected by the CLI.** The scheduler, the dashboard and the stored configuration all support the Spanish regulated tariff (REE PVPC), but `argparse` restricted the choices to `energy_charts` and `entsoe`, so seeding a fresh install with `ree_pvpc` aborted at startup.
+- **Docker publish workflow failed for every dev tag**: tags were derived with `type=semver`, and `2.7.0.dev4` is not valid semver, so the build aborted with "tag is needed when pushing to registry".
+
 ## [2.6.11] - 2026-10-20
 
 ### Fixed in 2.6.11

@@ -527,6 +527,11 @@ def build_handbrake_args(preset: Dict[str, object], *, source_resolution: str = 
             else:
                 args.extend(["-q", str(qv)])
         encoder_preset = str(video.get("encoder_preset") or "").strip()
+        if not encoder_preset and encoder.lower() in ("vce_av1", "vce_av1_10bit"):
+            # AMD VCE AV1 defaults to "high quality" preset for maximum compression
+            # efficiency. Without this, the encoder uses "balanced" which produces
+            # noticeably larger files than NVENC or CPU AV1 at the same CRF.
+            encoder_preset = "high quality"
         if encoder_preset:
             args.extend(["--encoder-preset", encoder_preset])
         max_width = int(video.get("max_width") or 0)
