@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`.env.example`**: a fully commented template for the Docker Compose setup. Copy it to `.env` and configure everything there — image tag and variant, media and config paths, port, user mapping, workers, GPUs, watch directories and price-based scheduling — without editing `docker-compose.yml`. `.env` is now git-ignored.
+
+### Changed
+
+- **`docker-compose.yml` is now fully variable-driven.** The image variant (`CLUTCH_IMAGE_VARIANT`), tag (`CLUTCH_IMAGE_TAG`), host port (`CLUTCH_PORT`), media directory (`CLUTCH_MEDIA_DIR` / `CLUTCH_MEDIA_MOUNT`) and config location (`CLUTCH_CONFIG_DIR`) are all read from `.env`, and the remaining `CLUTCH_*` options the entrypoint understands are wired through as well. Every variable keeps a sane default, so the compose file still works with no `.env` at all.
+- The README and the Docker wiki page now document the `dev` channel setup end to end (create `.env`, set `CLUTCH_IMAGE_TAG=dev` and `CLUTCH_UPDATE_CHANNEL=dev`, pull and recreate).
+
 ## [2.7.0.dev6] - 2026-11-06
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.

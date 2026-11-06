@@ -137,11 +137,25 @@ docker run -d \
   ghcr.io/adocampo/clutch:dev
 ```
 
-Or use the provided `docker-compose.yml` (edit to pick full or minimal, and set `CLUTCH_IMAGE_TAG` in a `.env` file to select `latest` or `dev`):
+Or use the provided `docker-compose.yml`. Copy the example environment file and
+edit only that — you never need to touch the compose file itself:
 
 ```bash
+cp .env.example .env
+$EDITOR .env                      # set CLUTCH_MEDIA_DIR, image tag, etc.
 docker compose up -d
 ```
+
+To track the development channel, set these two variables in `.env`:
+
+```bash
+CLUTCH_IMAGE_TAG=dev
+CLUTCH_UPDATE_CHANNEL=dev
+```
+
+...then `docker compose pull && docker compose up -d`. To go back to stable, set
+both to `latest`/`stable` (or remove them) and pull again. `.env` is git-ignored;
+`.env.example` documents every supported variable.
 
 To build locally from source:
 

@@ -110,32 +110,38 @@ Alternatively, pushing a Git tag (`v*`) triggers the GitHub Actions workflow at 
 
 ## Docker Compose
 
-A single `docker-compose.yml` is provided in the repository. It pulls from GHCR by default and includes commented-out options for the minimal image and building from source.
+A single `docker-compose.yml` is provided in the repository. It pulls from GHCR
+by default and every knob is a variable, so you should not need to edit it.
 
 ```bash
+cp .env.example .env   # then edit .env
 docker compose up -d
 ```
 
+`docker compose` reads `.env` automatically. Every variable has a default, so a
+missing `.env` still works — the example file documents all of them
+(`CLUTCH_IMAGE_TAG`, `CLUTCH_IMAGE_VARIANT`, `CLUTCH_MEDIA_DIR`, `CLUTCH_UID`,
+`CLUTCH_WORKERS`, `CLUTCH_GPUS`, `CLUTCH_WATCH_DIRS`, `CLUTCH_SCHEDULE`,
+`CLUTCH_PRICE_*`, ...).
+
 ### Switching images
 
-Edit `docker-compose.yml` and uncomment the desired `image:` line:
+Set the variant in `.env` instead of editing `docker-compose.yml`:
 
-```yaml
-services:
-  clutch:
-    # Pick ONE image:
-    image: ghcr.io/adocampo/clutch:${CLUTCH_IMAGE_TAG:-latest}           # Full (default)
-    # image: ghcr.io/adocampo/clutch-minimal:${CLUTCH_IMAGE_TAG:-latest} # Minimal (~280 MB)
+```bash
+# .env
+CLUTCH_IMAGE_VARIANT=clutch-minimal   # full image (default) | minimal image
 ```
 
 ### Choosing the release channel (`latest` vs `dev`)
 
-The image tag is selected through the `CLUTCH_IMAGE_TAG` variable, so you do not
-have to edit `docker-compose.yml`. Create a `.env` file next to it:
+The image tag comes from `CLUTCH_IMAGE_TAG`, so you do not have to edit
+`docker-compose.yml`. Put it in `.env`:
 
 ```bash
 # .env
 CLUTCH_IMAGE_TAG=dev
+CLUTCH_UPDATE_CHANNEL=dev
 ```
 
 or export it for a single command:
@@ -145,20 +151,15 @@ CLUTCH_IMAGE_TAG=dev docker compose pull
 CLUTCH_IMAGE_TAG=dev docker compose up -d
 ```
 
-Then tell the in-app updater which channel you are on, so the dashboard stops
-offering you a "newer" stable build over your dev one:
+`CLUTCH_UPDATE_CHANNEL` tells the in-app updater which channel you are on, so
+the dashboard stops offering you a "newer" stable build over your dev one. It is
+optional — the dashboard can also switch channel manually — but when it is set
+the container always starts on that channel, which is what you want when the
+image tag is the thing you pinned.
 
-```yaml
-    environment:
-      - CLUTCH_UPDATE_CHANNEL=dev
-```
-
-`CLUTCH_UPDATE_CHANNEL` is optional — the dashboard can also switch channel
-manually — but when it is set the container always starts on that channel, which
-is what you want when the image tag is the thing you pinned.
-
-To go back to stable, set `CLUTCH_IMAGE_TAG=latest` (or remove it) and
-`CLUTCH_UPDATE_CHANNEL=stable`, then `docker compose pull && docker compose up -d`.
+To go back to stable, set `CLUTCH_IMAGE_TAG=latest` and
+`CLUTCH_UPDATE_CHANNEL=stable` (or remove both), then
+`docker compose pull && docker compose up -d`.
 
 ### Building from source
 

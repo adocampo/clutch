@@ -1,29 +1,28 @@
 # ┌──────────────────────────────────────────────────────────────────────┐
 # │  Clutch — Video transcoding service                                 │
 # │                                                                     │
-# │  IMAGE VARIANT (uncomment ONE):                                     │
-# │    • clutch          — Full Arch image (~1.5 GB), includes shell,   │
-# │                        package manager, in-place upgrades via       │
-# │                        `clutch --upgrade`.                          │
-# │    • clutch-minimal  — Scratch-based (~280 MB), no shell, must      │
-# │                        rebuild/pull to upgrade.                     │
+# │  You do NOT need to edit this file. Copy `.env.example` to `.env`   │
+# │  next to it and set the variables you care about:                   │
 # │                                                                     │
-# │  IMAGE TAG (set CLUTCH_IMAGE_TAG in a .env file next to this file,  │
-# │  or export it before `docker compose up`):                          │
-# │    • latest (default) — latest stable release                       │
-# │    • dev              — latest development build (prerelease)       │
-# │    • 2.6.11           — a specific version                          │
+# │      cp .env.example .env                                           │
+# │      docker compose pull && docker compose up -d                    │
 # │                                                                     │
-# │  BUILD FROM SOURCE (instead of pulling from ghcr.io):               │
-# │    Comment out "image:" and uncomment the "build:" section below.   │
+# │  Every variable below has a sane default, so a missing `.env` still │
+# │  works.                                                             │
+# │                                                                     │
+# │  Quick reference:                                                   │
+# │    CLUTCH_IMAGE_VARIANT  clutch (default) | clutch-minimal          │
+# │    CLUTCH_IMAGE_TAG      latest (default) | dev | 2.7.0             │
+# │    CLUTCH_UPDATE_CHANNEL stable (default) | dev                     │
+# │    CLUTCH_MEDIA_DIR      host directory mounted at /media           │
 # └──────────────────────────────────────────────────────────────────────┘
 services:
   clutch:
-    # ── Image: pick one ──────────────────────────────────────────────
-    image: ghcr.io/adocampo/clutch:${CLUTCH_IMAGE_TAG:-latest}
-    # image: ghcr.io/adocampo/clutch-minimal:${CLUTCH_IMAGE_TAG:-latest}
+    # Full image (~1.5 GB, shell + in-place upgrades) or minimal (~280 MB).
+    image: ghcr.io/adocampo/${CLUTCH_IMAGE_VARIANT:-clutch}:${CLUTCH_IMAGE_TAG:-latest}
 
-    # ── Build from source (comment out "image:" above first) ─────────
+    # ── Build from source instead of pulling from ghcr.io ─────────────
+    # Comment out the "image:" line above and uncomment this block:
     # build:
     #   context: .
     #   #dockerfile: Dockerfile            # Full Arch image
@@ -33,23 +32,40 @@ services:
     container_name: clutch
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      # Host port comes from CLUTCH_PORT; the container always listens on 8765.
+      - "${CLUTCH_PORT:-8765}:8765"
     volumes:
-      - clutch-config:/config
-      - /path/to/media:/media       # ← change to your media directory
+      # Set CLUTCH_CONFIG_DIR to a host path to keep the config there instead
+      # of in the named `clutch-config` volume.
+      - ${CLUTCH_CONFIG_DIR:-clutch-config}:/config
+      - ${CLUTCH_MEDIA_DIR:-/path/to/media}:${CLUTCH_MEDIA_MOUNT:-/media}
+      # Mount extra host paths and list them in CLUTCH_ALLOW_ROOTS, e.g.:
+      # - /NAS02:/NAS02
     environment:
       # ── Timezone (for log timestamps) ──
-      - TZ=Europe/Madrid
+      - TZ=${TZ:-Europe/Madrid}
       # ── User mapping (run as non-root) ──
-      - CLUTCH_UID=1000
-      - CLUTCH_GID=1000
+      - CLUTCH_UID=${CLUTCH_UID:-1000}
+      - CLUTCH_GID=${CLUTCH_GID:-1000}
       # ── Workers ──
-      - CLUTCH_WORKERS=1
-      # ── Debug ──
-      # - CLUTCH_DEBUG=true
-      # ── Update channel used by the in-dashboard updater (stable | dev) ──
-      # Match this to the image tag: `dev` image → dev channel.
-      # - CLUTCH_UPDATE_CHANNEL=stable
+      - CLUTCH_WORKERS=${CLUTCH_WORKERS:-1}
+      # ── Release channel for the in-dashboard updater (stable | dev).
+      #    Keep it aligned with CLUTCH_IMAGE_TAG: dev image -> dev channel.
+      #    Left empty, the entrypoint does not pass --update-channel at all. ──
+      - CLUTCH_UPDATE_CHANNEL=${CLUTCH_UPDATE_CHANNEL:-}
+      # ── Everything below is optional: an empty value means "use the
+      #    built-in default", so leave it alone unless you need it. ──
+      - CLUTCH_DEBUG=${CLUTCH_DEBUG:-}
+      - CLUTCH_ALLOW_ROOTS=${CLUTCH_ALLOW_ROOTS:-}
+      - CLUTCH_SERVICE_DB=${CLUTCH_SERVICE_DB:-}
+      - CLUTCH_GPUS=${CLUTCH_GPUS:-}
+      - CLUTCH_WATCH_DIRS=${CLUTCH_WATCH_DIRS:-}
+      - CLUTCH_WATCH_RECURSIVE=${CLUTCH_WATCH_RECURSIVE:-}
+      - CLUTCH_SCHEDULE=${CLUTCH_SCHEDULE:-}
+      - CLUTCH_SCHEDULE_MODE=${CLUTCH_SCHEDULE_MODE:-}
+      - CLUTCH_PRICE_PROVIDER=${CLUTCH_PRICE_PROVIDER:-}
+      - CLUTCH_PRICE_COUNTRY=${CLUTCH_PRICE_COUNTRY:-}
+      - CLUTCH_PRICE_LIMIT=${CLUTCH_PRICE_LIMIT:-}
 
     # ── NVIDIA GPU passthrough (uncomment for hardware encoding) ──
     # deploy:
