@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.7.0.dev8] - 2026-11-06
+
+> **Dev build** — part of the `dev` update channel. Not a stable release.
 
 ### Fixed
 
