@@ -816,10 +816,13 @@ def main():
                              help="Manual schedule rule, e.g. 'mon-fri 22:00-08:00' or '00:00-06:00'. Repeat for more rules.")
     sched_group.add_argument("--schedule-mode", default="allow", choices=["allow", "block"],
                              help="Whether --schedule rules define when conversions are ALLOWED or BLOCKED (default: allow).")
-    sched_group.add_argument("--price-provider", default="", choices=["", "energy_charts", "entsoe"],
-                             help="Electricity price provider for automatic schedule.")
+    sched_group.add_argument("--price-provider", default="",
+                             choices=["", "ree_pvpc", "energy_charts", "entsoe"],
+                             help="Electricity price provider for automatic schedule. "
+                                  "ree_pvpc is the Spanish regulated tariff and needs no key or zone.")
     sched_group.add_argument("--price-country", default="",
-                             help="Bidding zone code for price provider (e.g. ES, DE-LU, FR).")
+                             help="Bidding zone code for price provider (e.g. ES, DE-LU, FR). "
+                                  "Not used by ree_pvpc, which is Spain only.")
     sched_group.add_argument("--price-limit", type=float, default=0.0,
                              help="Maximum electricity price in EUR/MWh. Conversions pause above this price.")
     sched_group.add_argument("--price-cheapest-hours", type=int, default=0,
