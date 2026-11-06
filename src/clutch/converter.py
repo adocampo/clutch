@@ -95,112 +95,6 @@ def _set_failure_reason(reason: str):
         _last_failure_reason[tid] = reason
 
 
-# ── Helper functions for VA-API fallback ─────────────────────────────────────────
-
-_unknown_video_codec_error_cache: dict[str, bool] = {}
-
-def _is_unknown_video_codec_error(err_text: str) -> bool:
-    """Return True if the error indicates an unknown/unsupported video codec (e.g., Dolby Vision).
-
-    Detects the phrase regardless of which HW encoder is active (nvenc, qsv, vaapi,
-    x264, x265 — x265 is the most common because it does not support Dolby Vision).
-    Results are cached by hash for performance.
-    """
-    h = hash(err_text)
-    if h in _unknown_video_codec_error_cache:
-        return _unknown_video_codec_error_cache[h]
-    result = "unknown video codec" in err_text.lower() or \
-             "unsupported video codec" in err_text.lower() or \
-             "invalid video codec" in err_text.lower()
-    if len(_unknown_video_codec_error_cache) > 200:
-        _unknown_video_codec_error_cache.clear()
-    _unknown_video_codec_error_cache[h] = result
-    return result
-
-
-# Legacy aliases maintained for backward compatibility
-_is_unknown_video_codec_hw_error = _is_unknown_video_codec_error
-
-def _is_unknown_video_codec_nvenc_error(err_text: str) -> bool:
-    """Return True if the error mentions NVENC and an unknown codec.
-
-    Kept for backward compatibility — callers should use _is_unknown_video_codec_error.
-    """
-    return "nvenc" in err_text.lower() and _is_unknown_video_codec_error(err_text)
-
-
-def _is_unknown_video_codec_vce_error(err_text: str) -> bool:
-    """Return True if the error mentions VCE and an unknown codec.
-
-    Kept for backward compatibility — callers should use _is_unknown_video_codec_error.
-    """
-    return "vce" in err_text.lower() and _is_unknown_video_codec_error(err_text)
-
-
-def _has_vaapi_support(report_progress=None) -> bool:
-    """Return True when ffmpeg with VA-API HEVC is available for fallback."""
-    try:
-        from clutch.ffmpeg_converter import is_vaapi_available, is_vaapi_codec
-        return is_vaapi_available() and is_vaapi_codec("hevc")
-    except ImportError:
-        return False
-
-
-def _try_vaapi_conversion(
-    input_file: str,
-    temp_filepath: str,
-    output_file: str,
-    video_codec: str,
-    audio_codec: str,
-    audio_passthrough: bool,
-    title=None,
-    audio_tracks=None,
-    output_format: str = "mkv",
-    subtitle_args=None,
-    thread_id: int = 0,
-    progress_callback=None,
-    emit_logs: bool = False,
-    detach_when: str = "never",
-    output_base_dir: str = "",
-    runtime_callback=None,
-) -> str:
-    """Retry with ffmpeg VA-API after HandBrake failed with 'unknown video codec'."""
-    report_progress = progress_callback or (lambda **kw: None)
-
-    try:
-        from clutch.ffmpeg_converter import convert_video_ffmpeg
-    except ImportError:
-        debug("convert_video: ffmpeg fallback not available")
-        return ""
-
-    report_progress(0.0, "VA-API fallback — retrying …")
-
-    try:
-        return convert_video_ffmpeg(
-            input_file=input_file,
-            temp_filepath=temp_filepath,
-            output_file=output_file,
-            video_codec=video_codec,
-            audio_codec=audio_codec,
-            audio_passthrough=audio_passthrough,
-            output_format=output_format,
-            subtitle_args=subtitle_args or [],
-            thread_id=thread_id,
-            progress_callback=progress_callback,
-            emit_logs=emit_logs,
-            title=title,
-            audio_tracks=audio_tracks,
-            detach_when=detach_when,
-            output_base_dir=output_base_dir,
-            runtime_callback=runtime_callback,
-        )
-    except Exception as fallback_err:
-        debug(f"convert_video: VA-API fallback failed: {fallback_err}")
-        _set_failure_reason(f"VA-API fallback failed: {str(fallback_err)[:500]}")
-        report_progress(0.0, f"VA-API fallback failed: {str(fallback_err)[:200]}")
-        raise  # re-raise so the caller handles failure
-
-
 def _get_conversion_state(thread_id: Optional[int] = None) -> dict[str, object]:
     key = thread_id if thread_id is not None else threading.get_ident()
     with _conversion_state_lock:
@@ -1167,6 +1061,180 @@ def _is_unknown_video_codec_error(hb_error_detail: str) -> bool:
 def _is_unknown_video_codec_hw_error(hb_error_detail: str) -> bool:
     """Return whether the HandBrake error was caused by an unknown HW codec."""
     return _is_unknown_video_codec_nvenc_error(hb_error_detail) or _is_unknown_video_codec_vce_error(hb_error_detail)
+
+
+# Phrases ffmpeg/libavcodec emits when the requested hardware encoder cannot run
+# on the present GPU (unsupported profile, missing NVENC session, no capable device).
+_HW_ENCODER_UNAVAILABLE_PATTERNS = (
+    "no capable devices found",
+    "doesn't support required nvenc features",
+    "avcodec_open failed",
+    "failure to initialise thread",
+    "failure to initialize thread",
+    "unsupported codec for this gpu",
+    "gpu does not support",
+    "nvenc not supported",
+    "encoder init failed",
+    # Session exhaustion / driver mismatch — single-NVENC cards (e.g. T400, GTX 1650)
+    # fail here when another app already holds the only session.
+    "cannot open encode session",
+    "failed to init nvenc session",
+    "nvenc session limit",
+    "call to nvenc api failed",
+    "driver does not support the required version",
+)
+
+
+def _is_hw_encoder_unavailable_error(hb_error_detail: str) -> bool:
+    """Return whether the GPU refused to initialise the requested HW encoder.
+
+    HandBrake reports this class of failure as an encoder initialisation error
+    (e.g. ``[hevc_nvenc] No capable devices found`` followed by
+    ``encavcodecInit: avcodec_open failed``) rather than as an "unknown video
+    codec" error. Callers must only act on it when a hardware encoder was
+    explicitly requested, so a software encode is never affected.
+    """
+    detail = str(hb_error_detail or "").lower()
+    return any(pattern in detail for pattern in _HW_ENCODER_UNAVAILABLE_PATTERNS)
+
+
+def describe_hw_encoder_unavailable(hw_label: str, offenders: Optional[list] = None) -> str:
+    """Actionable hint for a GPU that refused to initialise the HW encoder.
+
+    This class of failure is a hardware/driver limitation of the current GPU,
+    not a codec HandBrake is unable to encode. Retrying on the CPU would burn
+    hours producing a different file than the user asked for, so the job fails
+    fast with guidance instead. When ``offenders`` is known (see
+    :func:`_probe_unsupported_hw_encoder_options`) the message names the exact
+    encoder options to remove from the preset.
+    """
+    names = [str(o) for o in (offenders or []) if o]
+    if names:
+        joined = ", ".join(names)
+        return (
+            f"{hw_label} could not be initialised by the GPU: the encoder "
+            f"option(s) {joined} are not supported by this graphics card. "
+            f"Remove {joined} from the preset's encoder options and run the "
+            "job again."
+        )
+    return (
+        f"{hw_label} could not be initialised by the GPU. One or more encoder "
+        "options requested by the preset are not supported by this graphics "
+        "card (for example, 'temporal-aq' is unavailable on entry-level NVENC "
+        "chips such as the T400). Remove the unsupported option from the "
+        "preset's encoder options, or choose a different encoder."
+    )
+
+
+def _split_encopts(hb_params: list) -> list:
+    """Return the individual ``key=value`` tokens passed through ``--encopts``."""
+    options: list = []
+    for index, arg in enumerate(hb_params):
+        if str(arg) == "--encopts" and index + 1 < len(hb_params):
+            for token in str(hb_params[index + 1]).split(":"):
+                token = token.strip()
+                if token:
+                    options.append(token)
+    return options
+
+
+def _strip_encopts_args(hb_params: list) -> list:
+    """Return ``hb_params`` without ``--encopts``/``--start-at``/``--stop-at``."""
+    dropped_values = {"--encopts", "--start-at", "--stop-at"}
+    kept: list = []
+    skip_value = False
+    for arg in hb_params:
+        if skip_value:
+            skip_value = False
+            continue
+        if str(arg) in dropped_values:
+            skip_value = True
+            continue
+        kept.append(arg)
+    return kept
+
+
+def _probe_unsupported_hw_encoder_options(
+    input_file: str,
+    hb_params: list,
+    title: Optional[int] = None,
+    gpu_device: Optional[int] = None,
+    probe_seconds: float = 3.0,
+    max_options: int = 16,
+    total_budget_seconds: float = 90.0,
+) -> list:
+    """Identify which ``--encopts`` the GPU refuses, by probing a short clip.
+
+    HandBrake only reports ``Provided device doesn't support required NVENC
+    features`` for the whole option set, so the only way to tell the user which
+    option to delete is to retry them individually on a few seconds of video.
+    Returns the offending tokens, or an empty list when they cannot be
+    determined. Best-effort: any failure to probe simply yields no answer.
+    """
+    options = _split_encopts(hb_params)
+    # The NVENC device pin is never the culprit and would skew the probe.
+    options = [o for o in options if not o.lower().startswith("gpu=")]
+    if not options:
+        return []
+    options = options[:max_options]
+
+    base = _strip_encopts_args(hb_params)
+    # Replace the real output with a throwaway file inside the probe window.
+    try:
+        out_index = base.index("-o")
+        del base[out_index:out_index + 2]
+    except ValueError:
+        pass
+
+    probe_dir = tempfile.mkdtemp(prefix="clutch-hwprobe-")
+    started = time.monotonic()
+    try:
+        def probe(tokens: list) -> Optional[bool]:
+            """True = GPU accepted the options, False = refused, None = unknown."""
+            if time.monotonic() - started > total_budget_seconds:
+                return None
+            probe_out = os.path.join(probe_dir, "probe.mkv")
+            if os.path.exists(probe_out):
+                try:
+                    os.remove(probe_out)
+                except OSError:
+                    pass
+            args = [base[0], "-i", input_file, "-o", probe_out] + base[1:]
+            if title is not None:
+                args += ["--title", str(title)]
+            if tokens:
+                args += ["--encopts", ":".join(tokens)]
+            args += ["--start-at", "duration:0", "--stop-at", f"duration:{probe_seconds:g}"]
+            try:
+                completed = subprocess.run(
+                    args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=int(total_budget_seconds),
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                return None
+            output = completed.stdout or ""
+            if "work result = 0" in output or "Encode done!" in output:
+                return True
+            if "work result = " in output or "Failed to initialize job" in output:
+                return False
+            return None
+
+        # Sanity check: if the same command without any encopts also fails, the
+        # problem is not one of the options (no session free, driver issue...).
+        if probe([]) is not True:
+            return []
+
+        offenders: list = []
+        for token in options:
+            if probe([token]) is False:
+                offenders.append(token)
+        return offenders
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
 
 
 def _get_source_bit_depth(media_info_data: dict | None) -> str:
@@ -2433,11 +2501,34 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
             if not hb_error_detail:
                 hb_error_detail = _read_last_error_lines(log_path)
 
+            # An unknown HW codec name means HandBrake simply lacks that encoder in
+            # this build; falling back to the CPU still delivers the requested codec.
             should_retry_with_software = (
                 allow_nvenc_retry
                 and (nvenc_requested or vce_requested)
                 and _is_unknown_video_codec_hw_error(hb_error_detail)
             )
+
+            # The GPU itself refused the encoder (unsupported profile/option, no
+            # session available). A CPU fallback would take hours and produce a
+            # different file, so fail fast with an actionable message instead.
+            hw_encoder_unavailable = (
+                not should_retry_with_software
+                and (nvenc_requested or vce_requested)
+                and _is_hw_encoder_unavailable_error(hb_error_detail)
+            )
+            hw_offenders: list = []
+            if hw_encoder_unavailable:
+                # HandBrake blames the whole option set; probe a few seconds of
+                # video to tell the user exactly which option to delete.
+                hw_offenders = _probe_unsupported_hw_encoder_options(
+                    input_file, hb_params, title=title, gpu_device=gpu_device,
+                )
+                if hw_offenders:
+                    warning(
+                        "GPU rejected the encoder option(s): "
+                        + ", ".join(hw_offenders)
+                    )
 
             if should_retry_with_software:
                 hw_name = "AMD VCE" if vce_requested else "NVENC"
@@ -2499,29 +2590,6 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     allow_nvenc_retry=False,
                 )
 
-            # ── Fallback to VA-API (ffmpeg) after unknown video codec ──────────
-            if _is_unknown_video_codec_error(last_err) and _has_vaapi_support(report_progress):
-                debug(f"convert_video: unknown video codec after software fallback — trying vaapi_hevc")
-                _try_vaapi_conversion(
-                    input_file,
-                    temp_filepath,
-                    output_file,
-                    'vaapi_hevc',
-                    audio_codec,
-                    audio_passthrough,
-                    title=title,
-                    audio_tracks=audio_tracks,
-                    output_format=output_format,
-                    subtitle_args=subtitle_args,
-                    thread_id=thread_id,
-                    progress_callback=progress_callback,
-                    emit_logs=emit_logs,
-                    detach_when=detach_when,
-                    output_base_dir=output_base_dir,
-                    runtime_callback=runtime_callback,
-                )
-                return output_file  # returns on success or exits on failure
-
             _remove_temp_and_log(temp_filepath)
             _update_conversion_state(
                 thread_id,
@@ -2542,9 +2610,18 @@ def convert_video(input_file: str, output_dir: str, codec: str, encode_speed: st
                     error(f"Conversion failed [{elapsed_text}]: {os.path.basename(input_file)}")
                 else:
                     error(f"Conversion failed: {os.path.basename(input_file)}")
+                if hw_encoder_unavailable:
+                    error(describe_hw_encoder_unavailable(
+                        "AMD VCE" if vce_requested else "NVENC", hw_offenders))
                 if hb_error_detail:
                     error(f"HandBrakeCLI output:\n{hb_error_detail}")
-            _set_failure_reason(f"HandBrakeCLI exited with code {returncode}." + (f" Detail: {hb_error_detail[:500]}" if hb_error_detail else ""))
+            failure_reason = f"HandBrakeCLI exited with code {returncode}."
+            if hw_encoder_unavailable:
+                failure_reason = describe_hw_encoder_unavailable(
+                    "AMD VCE" if vce_requested else "NVENC", hw_offenders)
+            if hb_error_detail:
+                failure_reason += f" Detail: {hb_error_detail[:500]}"
+            _set_failure_reason(failure_reason)
             report_progress(last_progress, "Conversion failed.")
             return ""
     except ConversionDetached:

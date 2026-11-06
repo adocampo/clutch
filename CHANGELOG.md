@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Failed conversions crashed with `NameError: name 'last_err' is not defined`** instead of reporting the real HandBrake error. The VA-API fallback block in the failure path referenced variables that never existed in scope (`last_err`, `output_file`, `audio_codec`, `output_format`, `subtitle_args`), so every failed job died before logging why it failed. The block — and its orphaned `_try_vaapi_conversion` helper, which called `convert_video_ffmpeg` with arguments it does not accept — has been removed. AMD/Intel VA-API encoding is unaffected: it is dispatched before HandBrake runs.
+- **Hardware encoder failures now report the real cause instead of a `NameError`.** When the GPU refuses to initialise an NVENC/VCE encoder (`Provided device doesn't support required NVENC features`, `No capable devices found`, `avcodec_open failed`, exhausted NVENC sessions, driver mismatch), HandBrake reports an encoder-initialisation error rather than "unknown video codec", so the job used to fail with no useful message. Clutch now recognises those messages and fails the job with an actionable hint instead of silently spending hours on a CPU encode the user never asked for.
+- **Clutch now names the exact encoder option your GPU rejects.** HandBrake only blames the whole `--encopts` set, so when a job fails this way Clutch re-encodes a couple of seconds of the video once per option and reports precisely which one the card refused, e.g. `NVENC could not be initialised by the GPU: the encoder option(s) temporal-aq=1 are not supported by this graphics card. Remove temporal-aq=1 from the preset's encoder options and run the job again.` The probe is capped (16 options, 90 s total) and is skipped entirely when the bare command also fails, so a busy GPU or a driver problem is never misdiagnosed as a bad option.
+
+### Changed
+
+- Removed the duplicated, shadowed `_is_unknown_video_codec_*` predicates and the unused `_has_vaapi_support` helper.
+
 ## [2.7.0.dev5] - 2026-11-05
 
 > **Dev build** — part of the `dev` update channel. Not a stable release.
